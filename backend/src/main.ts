@@ -1,18 +1,25 @@
 import { NestFactory } from '@nestjs/core';
+
 import { AppModule } from './app.module';
+import { loadConfig } from './config';
+import { AppLogger } from './logger';
 
 /**
  * Application entrypoint.
  *
- * Bootstraps the NestJS application under the `/api/v1` global prefix. The
- * listening port is read from `PORT` (default 3000); it is replaced by the
- * Zod-validated config value once the config module is wired (BF-12).
+ * Loads and validates environment configuration (fail-fast), boots the Nest
+ * application under the `/api/v1` global prefix — keeping `/health` outside the
+ * versioned prefix for load-balancer probes — and routes logs through the
+ * request-correlated pino logger.
  */
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix('api/v1');
-  const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
+  const config = loadConfig();
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  app.useLogger(app.get(AppLogger));
+  app.setGlobalPrefix('api/v1', { exclude: ['health'] });
+
+  await app.listen(config.PORT);
 }
 
 void bootstrap();
