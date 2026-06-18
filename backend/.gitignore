@@ -1,0 +1,12 @@
+# Build artifacts
+dist/
+
+# Local env (committed .env.example only)
+.env
+.env.*
+!.env.example
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Prisma generated client lives in node_modules/.prisma
