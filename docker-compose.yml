@@ -1,0 +1,24 @@
+# Local development compose for the Spotify clone backend.
+# Brings up PostgreSQL 16 only; run the backend on the host with `npm run start:dev`.
+# (DESIGN section 7.1 — backend/frontend containers are optional for local dev.)
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: spotify-clon-db
+    environment:
+      POSTGRES_DB: spotify_clone
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spotify_clone"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db_data:
