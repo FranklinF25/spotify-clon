@@ -1,5 +1,5 @@
 # Local development compose for the Spotify clone backend.
-# Brings up PostgreSQL 16 only; run the backend on the host with `npm run start:dev`.
+# Brings up PostgreSQL 16 only; run the backend on the host with `pnpm start:dev`.
 # (DESIGN section 7.1 — backend/frontend containers are optional for local dev.)
 
 services:

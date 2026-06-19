@@ -1,6 +1,9 @@
 # Markdown files (per user request — not tracked in this repo)
 *.md
 
+# OpenSpec / SDD artifacts (local-only planning artifacts, kept locally + Engram)
+openspec/
+
 # Dependencies
 node_modules/
 
