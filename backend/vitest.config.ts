@@ -10,7 +10,7 @@ import { defineConfig } from 'vitest/config';
  * - `e2e`          full HTTP pipeline specs (Supertest + Nest TestingModule).
  * - `architecture` portfolio guard enforcing DESIGN §3.4 (expanded in BF-09).
  *
- * Each project has at least one example so `npm test` demonstrates every layer.
+ * Each project has at least one example so `pnpm test` demonstrates every layer.
  */
 export default defineConfig({
   test: {
