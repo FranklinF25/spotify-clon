@@ -88,6 +88,14 @@ describe('RefreshTokenUseCase', () => {
     expect(jwt.refreshSigned[0].sub).toBe('user-1');
   });
 
+  it('throws Unauthorized when the refresh token value is missing (controller passes undefined cookie)', async () => {
+    const { useCase } = setup();
+
+    await expect(
+      useCase.execute({ refreshTokenValue: undefined }),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
   it('throws Unauthorized when the refresh JWT cannot be verified', async () => {
     const { useCase, jwt } = setup();
     jwt.verifyFails = true;
@@ -122,6 +130,25 @@ describe('RefreshTokenUseCase', () => {
     await expect(
       useCase.execute({ refreshTokenValue: 'any' }),
     ).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('throws Unauthorized when revokeIfActive loses the concurrent rotation race (atomic reuse defence)', async () => {
+    const { useCase, refreshTokens, jwt } = setup();
+    seedToken(refreshTokens, { jti: 'jti-racy' });
+    jwt.refreshToVerify = {
+      sub: 'user-1',
+      jti: 'jti-racy',
+      email: 'user-1@example.com',
+    };
+    // Simulate the losing side of a concurrent rotation: another request
+    // already revoked the row atomically, so revokeIfActive returns false.
+    refreshTokens.revokeIfActiveResult = false;
+
+    await expect(
+      useCase.execute({ refreshTokenValue: 'any' }),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    // The loser must never insert a new active row.
+    expect(refreshTokens.saved).toHaveLength(1);
   });
 
   it('throws Unauthorized when the presented token is expired', async () => {

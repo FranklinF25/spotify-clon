@@ -7,7 +7,12 @@ import type { RefreshTokenRepositoryPort } from '../domain/ports/refresh-token-r
 import { RefreshToken } from '../domain/refresh-token.entity';
 
 export interface RefreshTokenUseCaseInput {
-  refreshTokenValue: string;
+  /**
+   * Raw refresh JWT pulled from the cookie. `undefined` when the cookie is
+   * missing — the controller passes the cookie straight through, so the type
+   * mirrors that reality instead of pretending the value is always present.
+   */
+  refreshTokenValue: string | undefined;
 }
 
 export interface RefreshTokenUseCaseResult {
@@ -24,17 +29,24 @@ export interface RefreshTokenUseCaseConfig {
  * issue a new refresh token, and return a fresh access token.
  *
  * Sequence (DESIGN Refresh flow):
- *   1. claims = verifyRefreshToken(value); throws ⇒ Unauthorized,
- *   2. rt = findByJti(claims.jti); null ⇒ Unauthorized,
- *   3. if (!rt.isActive()) throw Unauthorized,
- *   4. rt.revoke(now); save(rt)             ◀── rotation step 1: revoke presented
- *   5. signRefreshToken({sub, jti: newJti, email}); RefreshToken.issue; save
- *                                              ◀── rotation step 2: insert new
- *   6. signAccessToken({sub, email}).
+ *   1. if (!refreshTokenValue) throw Unauthorized  ◀── missing cookie short-circuit
+ *   2. claims = verifyRefreshToken(value); throws ⇒ Unauthorized,
+ *   3. rt = findByJti(claims.jti); null ⇒ Unauthorized,
+ *   4. if (!rt.isActive()) throw Unauthorized,
+ *   5. ok = revokeIfActive(claims.jti, now)        ◀── atomic rotation step 1
+ *      if (!ok) throw Unauthorized                    (lost the concurrent race
+ *                                                      ⇒ reuse detected),
+ *   6. signRefreshToken({sub, jti: newJti, email}); RefreshToken.issue; save
+ *                                                   ◀── rotation step 2: insert new
+ *   7. signAccessToken({sub, email}).
  *
  * Rotation always persists the audit trail: the presented row's `revokedAt`
- * is set, and a new row with a fresh jti is inserted. Reuse of a revoked jti
- * is detected at step 3 (the row is no longer active) and rejected.
+ * is stamped via the conditional `revokeIfActive` UPDATE, and a new row with
+ * a fresh jti is inserted. Reuse of a revoked jti is detected at step 5
+ * (the conditional UPDATE returns `false` because `revokedAt IS NULL` no
+ * longer matches) and rejected. The atomic UPDATE is what defeats the race
+ * where two concurrent refreshers with the same cookie would both otherwise
+ * observe `isActive() === true` and both insert a new active row.
  *
  * `email` is read straight from the refresh claims (DESIGN open-question
  * resolution) so we avoid a `UserRepositoryPort.findById` round trip on every
@@ -48,6 +60,10 @@ export class RefreshTokenUseCase {
   ) {}
 
   async execute(input: RefreshTokenUseCaseInput): Promise<RefreshTokenUseCaseResult> {
+    if (!input.refreshTokenValue) {
+      throw new UnauthorizedError();
+    }
+
     let claims: RefreshTokenPayload;
     try {
       claims = await this.jwt.verifyRefreshToken(input.refreshTokenValue);
@@ -59,13 +75,19 @@ export class RefreshTokenUseCase {
     if (!rt) {
       throw new UnauthorizedError();
     }
+    // Pre-check covers the expired-and-then-reused path (cheap, read-only).
+    // The atomic defence is the revokeIfActive call below.
     if (!rt.isActive()) {
       throw new UnauthorizedError();
     }
 
-    // Rotation step 1: revoke the presented row (persisted).
-    rt.revoke(new Date());
-    await this.refreshTokens.save(rt);
+    // Rotation step 1 (atomic): revoke the presented row iff it is still
+    // active. A `false` result means another concurrent refresher revoked it
+    // first ⇒ treat as reuse and reject without issuing a new credential.
+    const revoked = await this.refreshTokens.revokeIfActive(claims.jti, new Date());
+    if (!revoked) {
+      throw new UnauthorizedError();
+    }
 
     // Rotation step 2: issue a new refresh token with a fresh jti.
     const newJti = globalThis.crypto.randomUUID();

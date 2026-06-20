@@ -1,8 +1,9 @@
 import { Controller, Get, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AppLogger } from './logger';
 import { GlobalExceptionFilter } from './exception.filter';
 import { ConflictError } from './shared/errors/conflict-error';
 import { UnauthorizedError } from './shared/errors/unauthorized-error';
@@ -24,18 +25,29 @@ class ThrowingController {
   conflict(): never {
     throw new ConflictError('Email already registered');
   }
+
+  @Get('boom')
+  boom(): never {
+    throw new Error('something went very wrong');
+  }
 }
 
 describe('GlobalExceptionFilter envelope (DESIGN §4.3)', () => {
   let app: INestApplication;
+  let logger: AppLogger;
 
   beforeAll(async () => {
+    logger = { error: vi.fn(), log: vi.fn(), warn: vi.fn(), debug: vi.fn(), verbose: vi.fn() } as unknown as AppLogger;
     const moduleRef = await Test.createTestingModule({
       controllers: [ThrowingController],
     }).compile();
     app = moduleRef.createNestApplication();
-    app.useGlobalFilters(new GlobalExceptionFilter());
+    app.useGlobalFilters(new GlobalExceptionFilter(logger));
     await app.init();
+  });
+
+  beforeEach(() => {
+    (logger.error as ReturnType<typeof vi.fn>).mockClear();
   });
 
   afterAll(async () => {
@@ -69,5 +81,26 @@ describe('GlobalExceptionFilter envelope (DESIGN §4.3)', () => {
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: { code: 'CONFLICT', message: 'Email already registered' } });
     expect(res.body.error).not.toHaveProperty('details');
+  });
+
+  it('returns 500 INTERNAL_ERROR for unexpected exceptions and never leaks the original message', async () => {
+    const res = await request(app.getHttpServer()).get('/errors/boom');
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
+    expect(res.text).not.toContain('something went very wrong');
+  });
+
+  it('logs unexpected exceptions with the original error so 500s are never swallowed silently', async () => {
+    await request(app.getHttpServer()).get('/errors/boom');
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [payload, message] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(message).toBe('Unhandled exception');
+    expect(payload).toMatchObject({
+      err: expect.any(Error),
+      path: '/errors/boom',
+    });
+    expect((payload as { err: Error }).err.message).toBe('something went very wrong');
   });
 });

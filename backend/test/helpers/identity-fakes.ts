@@ -50,10 +50,26 @@ export class InMemoryUserRepository implements UserRepositoryPort {
 /**
  * In-memory refresh-token store. Records every `revokeAllForUser` invocation
  * (the single-session kill switch) so the LoginUseCase spec can assert it.
+ *
+ * `revokeIfActive` mirrors the conditional UPDATE of the Prisma repo: it
+ * returns `false` when the row is missing or already revoked. Setting the
+ * public `revokeIfActiveResult` field forces a specific outcome so the
+ * RefreshTokenUseCase rotation-race spec can simulate the losing side of a
+ * concurrent refresh without needing multiple threads.
+ *
+ * `revokeAllAndSave` is atomic in the same sense as the Prisma `$transaction`
+ * implementation: if `save` throws (configured via `saveShouldThrow`), the
+ * prior-row revocations are rolled back so the user is never left without
+ * active tokens.
  */
 export class InMemoryRefreshTokenRepository implements RefreshTokenRepositoryPort {
   public readonly saved: RefreshToken[] = [];
   public readonly revokedAllFor: Array<{ userId: string; exceptJti?: string }> = [];
+  public readonly revokeAllAndSaveCalls: Array<{ userId: string }> = [];
+  /** Force the next `revokeIfActive` outcome (undefined = real behaviour). */
+  public revokeIfActiveResult?: boolean;
+  /** Force the next `save` to throw (used by revokeAllAndSave atomicity test). */
+  public saveShouldThrow?: Error;
 
   async findByJti(jti: string): Promise<RefreshToken | null> {
     return this.saved.find((t) => t.jti === jti) ?? null;
@@ -65,6 +81,11 @@ export class InMemoryRefreshTokenRepository implements RefreshTokenRepositoryPor
   }
 
   async save(token: RefreshToken): Promise<RefreshToken> {
+    if (this.saveShouldThrow) {
+      const err = this.saveShouldThrow;
+      this.saveShouldThrow = undefined;
+      throw err;
+    }
     const idx = this.saved.findIndex((t) => t.id === token.id);
     if (idx >= 0) {
       this.saved[idx] = token;
@@ -86,6 +107,43 @@ export class InMemoryRefreshTokenRepository implements RefreshTokenRepositoryPor
       if (t.userId === userId && t.jti !== exceptJti) {
         t.revoke(now);
       }
+    }
+  }
+
+  async revokeIfActive(jti: string, revokedAt: Date): Promise<boolean> {
+    if (this.revokeIfActiveResult !== undefined) {
+      const forced = this.revokeIfActiveResult;
+      this.revokeIfActiveResult = undefined;
+      if (forced) {
+        const token = this.saved.find((t) => t.jti === jti);
+        token?.revoke(revokedAt);
+      }
+      return forced;
+    }
+    const token = this.saved.find((t) => t.jti === jti);
+    if (!token || token.revokedAt !== null) return false;
+    token.revoke(revokedAt);
+    return true;
+  }
+
+  async revokeAllAndSave(userId: string, newToken: RefreshToken): Promise<void> {
+    // Snapshot every row's revokedAt so we can roll back if the save throws.
+    const snapshot = this.saved.map((t) => ({ token: t, revokedAt: t.revokedAt }));
+    const now = newToken.issuedAt;
+    try {
+      for (const t of this.saved) {
+        if (t.userId === userId && t.revokedAt === null) {
+          t.revoke(now);
+        }
+      }
+      await this.save(newToken);
+      this.revokeAllAndSaveCalls.push({ userId });
+    } catch (err) {
+      // Roll back: restore the pre-transaction revokedAt on every touched row.
+      for (const snap of snapshot) {
+        snap.token.revokedAt = snap.revokedAt;
+      }
+      throw err;
     }
   }
 }

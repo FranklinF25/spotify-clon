@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
-import { Project, SyntaxKind } from 'ts-morph';
+import { dirname, relative, resolve } from 'node:path';
+import { Project } from 'ts-morph';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -150,7 +150,64 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
         }
       }
     }
-    expect(SyntaxKind.Decorator).toBeDefined();
     expect(offenders).toEqual([]);
+  });
+
+  it('forbids application → infrastructure imports (DESIGN §3.4 rule 2)', () => {
+    const offenders: string[] = [];
+    for (const file of applicationFiles) {
+      const source = loadSourceFile(file);
+      for (const declaration of source.getImportDeclarations()) {
+        const specifier = declaration.getModuleSpecifierValue();
+        // Only relative specifiers can resolve to a context layer. External
+        // packages (e.g. `zod`, `@nestjs/common`) are out of scope here —
+        // they are governed by the domain-framework rule and the boundaries
+        // ESLint plugin.
+        if (!specifier.startsWith('.')) continue;
+        const resolved = resolve(dirname(file), specifier);
+        const rel = posix(relative(srcRoot, resolved));
+        if (rel.split('/').includes('infrastructure')) {
+          offenders.push(relOf(file) + ' imports "' + specifier + '" (crosses into infrastructure)');
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('declares the four expected Driven Ports as interfaces under domain/ports', () => {
+    const expected = [
+      {
+        name: 'UserRepositoryPort',
+        path: 'contexts/identity/domain/ports/user-repository.port.ts',
+      },
+      {
+        name: 'RefreshTokenRepositoryPort',
+        path: 'contexts/identity/domain/ports/refresh-token-repository.port.ts',
+      },
+      {
+        name: 'PasswordHasherPort',
+        path: 'contexts/identity/domain/ports/password-hasher.port.ts',
+      },
+      {
+        name: 'JwtSignerPort',
+        path: 'contexts/identity/domain/ports/jwt-signer.port.ts',
+      },
+    ] as const;
+
+    for (const { name, path } of expected) {
+      const absolute = resolve(srcRoot, path);
+      expect(existsSync(absolute), `expected port file ${path}`).toBe(true);
+      const source = loadSourceFile(absolute);
+      const interfaceNames = source.getInterfaces().map((i) => i.getName());
+      expect(interfaceNames, `${name} must be declared as an interface in ${path}`).toContain(name);
+      // The port MUST be an interface — a class would silently bypass the
+      // "every Port is a TS interface" rule and let the application layer
+      // depend on a concrete type.
+      const classesNamedPort = source
+        .getClasses()
+        .map((c) => c.getName())
+        .filter((n): n is string => Boolean(n) && n === name);
+      expect(classesNamedPort, `${name} must not be a class`).toEqual([]);
+    }
   });
 });

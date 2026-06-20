@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TestDbContext } from '../../../../test/helpers/test-db';
 import { startTestDb } from '../../../../test/helpers/test-db';
+import { ConflictError } from '../../../shared/errors/conflict-error';
 import { User } from '../domain/user.entity';
 import { PrismaUserRepository } from './prisma-user.repository';
 
@@ -137,6 +138,28 @@ describe('PrismaUserRepository', () => {
       await expect(
         repo.save(seedUser({ id: crypto.randomUUID(), email: 'dup@example.com' })),
       ).rejects.toThrow();
+    });
+
+    it('maps a P2002 unique violation to a ConflictError (race loser gets 409, not 500)', async () => {
+      await repo.save(seedUser({ id: crypto.randomUUID(), email: 'dup@example.com' }));
+
+      await expect(
+        repo.save(seedUser({ id: crypto.randomUUID(), email: 'dup@example.com' })),
+      ).rejects.toBeInstanceOf(ConflictError);
+    });
+
+    it('returns ConflictError for the loser of two concurrent saves with the same email', async () => {
+      const email = 'race@example.com';
+      const results = await Promise.allSettled([
+        repo.save(seedUser({ id: crypto.randomUUID(), email })),
+        repo.save(seedUser({ id: crypto.randomUUID(), email })),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictError);
     });
   });
 });

@@ -72,6 +72,44 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepositoryPort 
       data: { revokedAt: new Date() },
     });
   }
+
+  async revokeIfActive(jti: string, revokedAt: Date): Promise<boolean> {
+    // Conditional UPDATE — only flips a still-active row. The `count` tells
+    // the caller whether it won or lost the concurrent-rotation race.
+    const result = await this.prisma.refreshToken.updateMany({
+      where: { jti, revokedAt: null },
+      data: { revokedAt },
+    });
+    return result.count === 1;
+  }
+
+  async revokeAllAndSave(userId: string, newToken: RefreshToken): Promise<void> {
+    // Single transaction: revoke every active row for the user, then upsert
+    // the freshly issued replacement. If the upsert fails (e.g. a concurrent
+    // registration of the same jti) the revocations are rolled back so the
+    // user is never left with zero active tokens.
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: newToken.issuedAt },
+      }),
+      this.prisma.refreshToken.upsert({
+        where: { id: newToken.id },
+        create: {
+          id: newToken.id,
+          userId: newToken.userId,
+          jti: newToken.jti,
+          issuedAt: newToken.issuedAt,
+          expiresAt: newToken.expiresAt,
+          revokedAt: newToken.revokedAt,
+          createdAt: newToken.createdAt,
+        },
+        update: {
+          revokedAt: newToken.revokedAt,
+        },
+      }),
+    ]);
+  }
 }
 
 function toDomain(row: PrismaRefreshToken): RefreshToken {

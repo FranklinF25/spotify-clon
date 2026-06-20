@@ -33,6 +33,40 @@ describe('RequestIdMiddleware', () => {
     expect(nextCalled).toBe(true);
   });
 
+  it('rejects an incoming x-request-id with invalid characters and falls back to a fresh UUID', () => {
+    const middleware = new RequestIdMiddleware();
+    // CRLF injection attempt — must NOT pass through.
+    const req = { get: (_name: string) => 'evil\r\nSet-Cookie: admin=1' } as never;
+    const responseHeader: Record<string, string> = {};
+    const res = { setHeader: (name: string, value: string) => (responseHeader[name] = value) } as never;
+
+    middleware.use(req, res, () => {
+      /* next */
+    });
+
+    const generated = (req as { requestId?: string }).requestId;
+    expect(generated).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(generated).not.toContain('\r');
+    expect(generated).not.toContain('\n');
+    expect(responseHeader['x-request-id']).toBe(generated);
+  });
+
+  it('rejects an incoming x-request-id that exceeds 64 characters and falls back to a fresh UUID', () => {
+    const middleware = new RequestIdMiddleware();
+    const tooLong = 'a'.repeat(65);
+    const req = { get: (_name: string) => tooLong } as never;
+    const responseHeader: Record<string, string> = {};
+    const res = { setHeader: (name: string, value: string) => (responseHeader[name] = value) } as never;
+
+    middleware.use(req, res, () => {
+      /* next */
+    });
+
+    const generated = (req as { requestId?: string }).requestId;
+    expect(generated).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(generated).not.toBe(tooLong);
+  });
+
   it('generates a uuid request id when the header is absent', () => {
     const middleware = new RequestIdMiddleware();
     const req = { get: () => undefined } as never;
