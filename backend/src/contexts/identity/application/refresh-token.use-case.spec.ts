@@ -151,6 +151,27 @@ describe('RefreshTokenUseCase', () => {
     expect(refreshTokens.saved).toHaveLength(1);
   });
 
+  it('rolls back the revocation when the new-token save fails mid-rotation (R2-3 atomicity)', async () => {
+    const { useCase, refreshTokens, jwt } = setup();
+    const presented = seedToken(refreshTokens, { jti: 'jti-old-rollback' });
+    jwt.refreshToVerify = {
+      sub: 'user-1',
+      jti: 'jti-old-rollback',
+      email: 'user-1@example.com',
+    };
+    // Simulate a unique-violation on the new jti mid-rotation.
+    refreshTokens.saveShouldThrow = new Error('unique jti violation');
+
+    await expect(
+      useCase.execute({ refreshTokenValue: 'any' }),
+    ).rejects.toThrow('unique jti violation');
+
+    // Atomic guarantee: the old row was NEVER actually revoked (rolled back).
+    expect(presented.revokedAt).toBeNull();
+    // No new row was inserted.
+    expect(refreshTokens.saved).toHaveLength(1);
+  });
+
   it('throws Unauthorized when the presented token is expired', async () => {
     const { useCase, refreshTokens, jwt } = setup();
     // ttlMs=0 → expiresAt = issuedAt (2025-01-01); current real time is past that,

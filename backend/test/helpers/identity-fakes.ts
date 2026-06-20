@@ -61,14 +61,19 @@ export class InMemoryUserRepository implements UserRepositoryPort {
  * implementation: if `save` throws (configured via `saveShouldThrow`), the
  * prior-row revocations are rolled back so the user is never left without
  * active tokens.
+ *
+ * `revokeIfActiveAndSave` mirrors the rotation primitive of the Prisma repo:
+ * conditional revoke + new-row insert in a single logical transaction. On any
+ * save failure the conditional revoke is rolled back so the user is never
+ * left with zero active tokens (the rotation analogue of S4).
  */
 export class InMemoryRefreshTokenRepository implements RefreshTokenRepositoryPort {
   public readonly saved: RefreshToken[] = [];
   public readonly revokedAllFor: Array<{ userId: string; exceptJti?: string }> = [];
   public readonly revokeAllAndSaveCalls: Array<{ userId: string }> = [];
-  /** Force the next `revokeIfActive` outcome (undefined = real behaviour). */
+  /** Force the next `revokeIfActive` / `revokeIfActiveAndSave` outcome (undefined = real behaviour). */
   public revokeIfActiveResult?: boolean;
-  /** Force the next `save` to throw (used by revokeAllAndSave atomicity test). */
+  /** Force the next `save` to throw (used by revokeAllAndSave / revokeIfActiveAndSave atomicity tests). */
   public saveShouldThrow?: Error;
 
   async findByJti(jti: string): Promise<RefreshToken | null> {
@@ -124,6 +129,39 @@ export class InMemoryRefreshTokenRepository implements RefreshTokenRepositoryPor
     if (!token || token.revokedAt !== null) return false;
     token.revoke(revokedAt);
     return true;
+  }
+
+  async revokeIfActiveAndSave(
+    jti: string,
+    revokedAt: Date,
+    newToken: RefreshToken,
+  ): Promise<boolean> {
+    // Snapshot the target row's revokedAt BEFORE the conditional revoke so we
+    // can roll it back if the new-row save throws. Same atomicity shape as
+    // `revokeAllAndSave` (S4) — the rotation analogue (R2-3).
+    const target = this.saved.find((t) => t.jti === jti);
+    const snapshot = target ? { token: target, revokedAt: target.revokedAt } : null;
+
+    // Honor the forced race-loss outcome so the use-case spec can simulate
+    // the losing side of a concurrent rotation.
+    const forced = this.revokeIfActiveResult;
+    if (forced !== undefined) {
+      this.revokeIfActiveResult = undefined;
+      if (!forced) return false;
+    } else if (!target || target.revokedAt !== null) {
+      return false;
+    }
+
+    try {
+      target?.revoke(revokedAt);
+      await this.save(newToken);
+      return true;
+    } catch (err) {
+      // Roll back: restore the pre-transaction revokedAt on the target row so
+      // a failed rotation never leaves the user with zero active tokens.
+      if (snapshot) snapshot.token.revokedAt = snapshot.revokedAt;
+      throw err;
+    }
   }
 
   async revokeAllAndSave(userId: string, newToken: RefreshToken): Promise<void> {

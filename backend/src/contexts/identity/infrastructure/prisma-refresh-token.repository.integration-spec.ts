@@ -287,5 +287,85 @@ describe('PrismaRefreshTokenRepository', () => {
 
       expect((await repo.findByJti('theirs'))?.isRevoked()).toBe(false);
     });
+
+    it('rolls back the prior-token revocations when the new-token insert violates the jti unique constraint (R2-2 atomicity)', async () => {
+      // Pre-seed an active token for the user — this is the row that must
+      // SURVIVE the rollback (still active afterwards).
+      const oldActive = issueToken('old-active');
+      await repo.save(oldActive);
+      // Pre-seed a row whose jti will collide with the new token's jti.
+      const collision = issueToken('collision-jti');
+      await repo.save(collision);
+      // The new token we attempt to insert reuses the colliding jti.
+      const newToken = issueToken('collision-jti');
+
+      await expect(repo.revokeAllAndSave(userId, newToken)).rejects.toThrow();
+
+      // Atomicity guarantee (S4 / R2-2): the upsert failure rolled back the
+      // prior-row revocations, so oldActive is STILL active.
+      const survivor = await repo.findByJti('old-active');
+      expect(survivor?.revokedAt).toBeNull();
+      expect(survivor?.isActive()).toBe(true);
+    });
+  });
+
+  describe('revokeIfActiveAndSave (atomic rotation primitive)', () => {
+    it('revokes the presented row and inserts the new token when the row is still active', async () => {
+      const old = issueToken('rot-active');
+      await repo.save(old);
+      const newToken = issueToken('rot-new');
+
+      const ok = await repo.revokeIfActiveAndSave('rot-active', new Date('2024-05-01T00:00:00Z'), newToken);
+
+      expect(ok).toBe(true);
+      const oldRow = await repo.findByJti('rot-active');
+      expect(oldRow?.revokedAt).toEqual(new Date('2024-05-01T00:00:00Z'));
+      const newRow = await repo.findByJti('rot-new');
+      expect(newRow?.isActive()).toBe(true);
+    });
+
+    it('returns false and does NOT insert when the presented row was already revoked (reuse)', async () => {
+      const old = issueToken('rot-reuse');
+      old.revoke(new Date('2024-05-01T00:00:00Z'));
+      await repo.save(old);
+      const newToken = issueToken('rot-new-reuse');
+
+      const ok = await repo.revokeIfActiveAndSave('rot-reuse', new Date('2024-06-01T00:00:00Z'), newToken);
+
+      expect(ok).toBe(false);
+      // No insert happened.
+      expect(await repo.findByJti('rot-new-reuse')).toBeNull();
+      // The original revoke timestamp is preserved (conditional UPDATE matched 0 rows).
+      const oldRow = await repo.findByJti('rot-reuse');
+      expect(oldRow?.revokedAt).toEqual(new Date('2024-05-01T00:00:00Z'));
+    });
+
+    it('returns false when the jti does not exist', async () => {
+      const newToken = issueToken('rot-new-unknown');
+      const ok = await repo.revokeIfActiveAndSave('no-such-jti', new Date(), newToken);
+      expect(ok).toBe(false);
+      expect(await repo.findByJti('rot-new-unknown')).toBeNull();
+    });
+
+    it('rolls back the conditional revoke when the new-token insert violates the jti unique constraint (R2-3 atomicity)', async () => {
+      // The active row whose revocation MUST roll back on insert failure.
+      const oldActive = issueToken('rot-old-active');
+      await repo.save(oldActive);
+      // Pre-seed a row that will collide with the new token's jti.
+      const collision = issueToken('rot-collision');
+      await repo.save(collision);
+      // New token reuses the colliding jti → insert inside the tx throws P2002.
+      const newToken = issueToken('rot-collision');
+
+      await expect(
+        repo.revokeIfActiveAndSave('rot-old-active', new Date('2024-05-01T00:00:00Z'), newToken),
+      ).rejects.toThrow();
+
+      // Atomicity guarantee (R2-3): the conditional revoke was rolled back,
+      // so oldActive is STILL active (not revoked).
+      const survivor = await repo.findByJti('rot-old-active');
+      expect(survivor?.revokedAt).toBeNull();
+      expect(survivor?.isActive()).toBe(true);
+    });
   });
 });

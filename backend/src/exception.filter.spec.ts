@@ -95,12 +95,20 @@ describe('GlobalExceptionFilter envelope (DESIGN §4.3)', () => {
     await request(app.getHttpServer()).get('/errors/boom');
 
     expect(logger.error).toHaveBeenCalledTimes(1);
-    const [payload, message] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(message).toBe('Unhandled exception');
-    expect(payload).toMatchObject({
-      err: expect.any(Error),
-      path: '/errors/boom',
-    });
-    expect((payload as { err: Error }).err.message).toBe('something went very wrong');
+    // String-first AppLogger convention: error(message, ...optional). The
+    // requestId is attached automatically by the ALS child logger, so the
+    // filter must NOT pass it manually.
+    expect(logger.error).toHaveBeenCalledWith(
+      'Unhandled exception',
+      expect.objectContaining({
+        err: expect.any(Error),
+        path: '/errors/boom',
+      }),
+    );
+    const [, payload] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      unknown,
+      { err: Error },
+    ];
+    expect(payload.err.message).toBe('something went very wrong');
   });
 });

@@ -47,14 +47,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     // Catch-all: log the original exception with correlation context BEFORE
     // responding so 500s are observable. The client only ever sees the generic
     // message — the original error stays in the logs.
-    this.logger?.error(
-      {
-        err: exception,
-        requestId: req?.requestId,
-        path: req?.url,
-      },
-      'Unhandled exception',
-    );
+    //
+    // String-first AppLogger convention: error(message, ...optional). The
+    // requestId is NOT passed manually — `AppLogger` resolves it from the
+    // AsyncLocalStorage context and attaches it via the pino child logger, so
+    // threading it through here would be both redundant and ineffective.
+    this.logger?.error('Unhandled exception', { err: exception, path: req?.url });
     response
       .status(HttpStatus.INTERNAL_SERVER_ERROR)
       .json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });

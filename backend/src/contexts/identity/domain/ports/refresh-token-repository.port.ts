@@ -14,6 +14,10 @@ import type { RefreshToken } from '../refresh-token.entity';
  *   - `revokeIfActive(jti, revokedAt)` performs a conditional UPDATE so the
  *     rotation step is atomic against concurrent refreshers (a returning
  *     `false` means "another caller revoked it first" → reuse detected);
+ *   - `revokeIfActiveAndSave(jti, revokedAt, newToken)` runs the rotation
+ *     (conditional revoke + new-row insert) inside a single transaction so a
+ *     save failure never leaves the user with zero active tokens — the
+ *     rotation analogue of `revokeAllAndSave`;
  *   - `revokeAllAndSave(userId, newToken)` runs the single-session kill switch
  *     and the new-row insert inside a single transaction so a save failure
  *     never leaves the user with zero active tokens.
@@ -41,6 +45,19 @@ export interface RefreshTokenRepositoryPort {
    * both pass).
    */
   revokeIfActive(jti: string, revokedAt: Date): Promise<boolean>;
+  /**
+   * Single-transaction rotation primitive: atomically revoke the active row
+   * identified by `jti` AND insert `newToken`. If the conditional revoke
+   * matches zero rows (token was already revoked ⇒ reuse detected) no insert
+   * happens and the method returns `false`. If anything throws (e.g. a unique
+   * violation on the new jti) both changes roll back so the user is never
+   * left with zero active tokens — the rotation analogue of
+   * {@link revokeAllAndSave}.
+   *
+   * Returns `true` iff the conditional revoke matched exactly one row AND the
+   * new row was inserted (both committed together).
+   */
+  revokeIfActiveAndSave(jti: string, revokedAt: Date, newToken: RefreshToken): Promise<boolean>;
   /**
    * Single-transaction single-session kill switch: revoke every active row for
    * `userId` and insert `newToken`. If the insert fails the revocations are
