@@ -1,6 +1,7 @@
 import { type MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
+import { AuthModule } from './contexts/identity/infrastructure/auth.module';
 import { loadConfig, type EnvConfig } from './config';
 import { GlobalExceptionFilter } from './exception.filter';
 import { HealthController } from './health.controller';
@@ -19,11 +20,11 @@ export const ENV_CONFIG = Symbol('ENV_CONFIG');
  *  - structured pino logger with request-id correlation (AppLogger),
  *  - global exception filter (DESIGN 4.3 envelope),
  *  - request-id middleware on every route,
- *  - health endpoint.
- *
- * Bounded contexts are imported here as they land (identity in PR-3).
+ *  - health endpoint,
+ * and imports the identity bounded context (AuthModule).
  */
 @Module({
+  imports: [AuthModule],
   controllers: [HealthController],
   providers: [
     { provide: ENV_CONFIG, useFactory: (): EnvConfig => loadConfig() },
