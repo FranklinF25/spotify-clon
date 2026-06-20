@@ -33,11 +33,26 @@ function isTypeScript(rel: string): boolean {
   return rel.endsWith('.ts') && !rel.endsWith('.d.ts');
 }
 
+/**
+ * Production source = non-declaration TypeScript that is NOT a test file.
+ * Test files (unit / integration / e2e specs) legitimately import vitest and
+ * other dev-only packages, so the framework-import and structural scans below
+ * must scope to production sources only.
+ */
+function isProduction(rel: string): boolean {
+  return (
+    isTypeScript(rel) &&
+    !rel.endsWith('.spec.ts') &&
+    !rel.endsWith('.integration-spec.ts') &&
+    !rel.endsWith('.e2e-spec.ts')
+  );
+}
+
 function sourceEntries(): string[] {
   if (!existsSync(srcRoot)) return [];
   return (readdirSync(srcRoot, { recursive: true }) as string[])
     .map((entry) => posix(entry))
-    .filter((entry) => isTypeScript(entry));
+    .filter((entry) => isProduction(entry));
 }
 
 const entries = sourceEntries();
