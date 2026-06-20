@@ -77,10 +77,10 @@ export class LoginUseCase {
       now: new Date(),
       ttlMs: this.config.refreshTokenTtlMs,
     });
-    // Single-session: kill every previously active refresh token for this user
-    // before issuing the new one so only the most recent session can refresh.
-    await this.refreshTokens.revokeAllForUser(user.id);
-    await this.refreshTokens.save(refreshToken);
+    // Single-session kill switch AND the new-row insert happen in one
+    // transaction: if the insert fails the prior revocations roll back so
+    // the user is never left with zero active tokens (S4 atomicity fix).
+    await this.refreshTokens.revokeAllAndSave(user.id, refreshToken);
 
     const accessToken = await this.jwt.signAccessToken({
       sub: user.id,

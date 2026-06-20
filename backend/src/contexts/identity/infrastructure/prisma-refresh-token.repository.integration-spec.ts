@@ -220,4 +220,72 @@ describe('PrismaRefreshTokenRepository', () => {
       expect(await repo.findActiveByUser(userId)).toEqual([]);
     });
   });
+
+  describe('revokeIfActive (atomic rotation primitive)', () => {
+    it('returns true and revokes when the row is still active', async () => {
+      const token = issueToken('jti-atomic-active');
+      await repo.save(token);
+      const at = new Date('2024-05-01T00:00:00Z');
+
+      const ok = await repo.revokeIfActive('jti-atomic-active', at);
+
+      expect(ok).toBe(true);
+      const found = await repo.findByJti('jti-atomic-active');
+      expect(found?.revokedAt).toEqual(at);
+    });
+
+    it('returns false and does not mutate when the row was already revoked', async () => {
+      const token = issueToken('jti-atomic-revoked');
+      token.revoke(new Date('2024-05-01T00:00:00Z'));
+      await repo.save(token);
+
+      const ok = await repo.revokeIfActive('jti-atomic-revoked', new Date('2024-06-01T00:00:00Z'));
+
+      expect(ok).toBe(false);
+      // Original timestamp preserved — the conditional UPDATE matched 0 rows.
+      const found = await repo.findByJti('jti-atomic-revoked');
+      expect(found?.revokedAt).toEqual(new Date('2024-05-01T00:00:00Z'));
+    });
+
+    it('returns false when the jti does not exist', async () => {
+      expect(await repo.revokeIfActive('no-such-jti', new Date())).toBe(false);
+    });
+  });
+
+  describe('revokeAllAndSave (single-transaction single-session kill switch)', () => {
+    it('revokes every prior active token and inserts the new one in one transaction', async () => {
+      const old1 = issueToken('old-1');
+      const old2 = issueToken('old-2');
+      await repo.save(old1);
+      await repo.save(old2);
+      const newToken = issueToken('new');
+
+      await repo.revokeAllAndSave(userId, newToken);
+
+      const active = await repo.findActiveByUser(userId);
+      expect(active).toHaveLength(1);
+      expect(active[0]?.jti).toBe('new');
+      expect((await repo.findByJti('old-1'))?.isRevoked()).toBe(true);
+      expect((await repo.findByJti('old-2'))?.isRevoked()).toBe(true);
+    });
+
+    it('does not touch tokens belonging to another user', async () => {
+      const other = await prisma.user.create({
+        data: { email: 'carol@example.com', passwordHash: 'h', displayName: 'Carol' },
+      });
+      const theirs = RefreshToken.issue({
+        id: crypto.randomUUID(),
+        userId: other.id,
+        jti: 'theirs',
+        now: new Date(),
+        ttlMs: SEVEN_DAYS_MS,
+      });
+      await repo.save(theirs);
+      const newToken = issueToken('mine');
+
+      await repo.revokeAllAndSave(userId, newToken);
+
+      expect((await repo.findByJti('theirs'))?.isRevoked()).toBe(false);
+    });
+  });
 });

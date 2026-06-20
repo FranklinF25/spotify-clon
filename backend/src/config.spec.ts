@@ -43,4 +43,22 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...validBase, COOKIE_SECURE: 'false' }).COOKIE_SECURE).toBe(false);
     expect(loadConfig(validBase).REFRESH_COOKIE_PATH).toBe('/api/v1/auth');
   });
+
+  it('defaults COOKIE_SECURE to false in development when unset', () => {
+    expect(loadConfig({ ...validBase }).COOKIE_SECURE).toBe(false);
+  });
+
+  it('defaults COOKIE_SECURE to true in production when unset (spec: refresh cookie MUST be Secure in prod)', () => {
+    expect(loadConfig({ ...validBase, NODE_ENV: 'production' }).COOKIE_SECURE).toBe(true);
+  });
+
+  it('fails fast when production explicitly disables COOKIE_SECURE', () => {
+    expect(() =>
+      loadConfig({ ...validBase, NODE_ENV: 'production', COOKIE_SECURE: 'false' }),
+    ).toThrowError(/COOKIE_SECURE must be true in production/);
+  });
+
+  it('honours an explicit COOKIE_SECURE=true in production', () => {
+    expect(loadConfig({ ...validBase, NODE_ENV: 'production', COOKIE_SECURE: 'true' }).COOKIE_SECURE).toBe(true);
+  });
 });

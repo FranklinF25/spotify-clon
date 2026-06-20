@@ -5,8 +5,9 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
+import { AppLogger } from './logger';
 import { type ErrorCode, DomainError } from './shared/errors/domain-error';
 
 /**
@@ -17,12 +18,18 @@ import { type ErrorCode, DomainError } from './shared/errors/domain-error';
  * - NestJS {@link HttpException}s (e.g. framework-thrown 404s) are mapped to a
  *   matching code via {@link codeForStatus}.
  * - Anything else becomes a 500 INTERNAL_ERROR with a generic message (the
- *   original error is never leaked to the client).
+ *   original error is never leaked to the client). The original exception is
+ *   logged with the request id and path before responding so 500s surface in
+ *   observability instead of being silently swallowed.
  */
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  constructor(private readonly logger?: AppLogger) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
-    const response = host.switchToHttp().getResponse<Response>();
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const req = ctx.getRequest<Request & { requestId?: string }>();
 
     if (exception instanceof DomainError) {
       response.status(exception.status).json({ error: exception.toJSON() });
@@ -37,6 +44,17 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    // Catch-all: log the original exception with correlation context BEFORE
+    // responding so 500s are observable. The client only ever sees the generic
+    // message — the original error stays in the logs.
+    this.logger?.error(
+      {
+        err: exception,
+        requestId: req?.requestId,
+        path: req?.url,
+      },
+      'Unhandled exception',
+    );
     response
       .status(HttpStatus.INTERNAL_SERVER_ERROR)
       .json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
