@@ -33,20 +33,27 @@ export interface RefreshTokenUseCaseConfig {
  *   2. claims = verifyRefreshToken(value); throws ⇒ Unauthorized,
  *   3. rt = findByJti(claims.jti); null ⇒ Unauthorized,
  *   4. if (!rt.isActive()) throw Unauthorized,
- *   5. ok = revokeIfActive(claims.jti, now)        ◀── atomic rotation step 1
- *      if (!ok) throw Unauthorized                    (lost the concurrent race
- *                                                      ⇒ reuse detected),
- *   6. signRefreshToken({sub, jti: newJti, email}); RefreshToken.issue; save
- *                                                   ◀── rotation step 2: insert new
+ *   5. signRefreshToken({sub, jti: newJti, email}); RefreshToken.issue
+ *                                                   ◀── build the replacement row
+ *   6. ok = revokeIfActiveAndSave(claims.jti, now, newRt)  ◀── atomic rotation:
+ *                                                          conditional revoke +
+ *                                                          new-row insert in one
+ *                                                          transaction,
+ *      if (!ok) throw Unauthorized                          (lost the concurrent
+ *                                                            race ⇒ reuse
+ *                                                            detected, no insert),
  *   7. signAccessToken({sub, email}).
  *
  * Rotation always persists the audit trail: the presented row's `revokedAt`
- * is stamped via the conditional `revokeIfActive` UPDATE, and a new row with
- * a fresh jti is inserted. Reuse of a revoked jti is detected at step 5
- * (the conditional UPDATE returns `false` because `revokedAt IS NULL` no
- * longer matches) and rejected. The atomic UPDATE is what defeats the race
- * where two concurrent refreshers with the same cookie would both otherwise
- * observe `isActive() === true` and both insert a new active row.
+ * is stamped via the conditional UPDATE inside the same transaction that
+ * inserts a new row with a fresh jti. Reuse of a revoked jti is detected at
+ * step 6 (the conditional UPDATE matches zero rows because `revokedAt IS NULL`
+ * no longer holds) and rejected without inserting. The atomic
+ * `revokeIfActiveAndSave` is what defeats BOTH the concurrent-rotation race
+ * (two refreshers with the same cookie cannot both pass) AND the
+ * partial-failure hole (if the insert fails the conditional revoke rolls
+ * back so the user is never left with zero active tokens — the rotation
+ * analogue of S4).
  *
  * `email` is read straight from the refresh claims (DESIGN open-question
  * resolution) so we avoid a `UserRepositoryPort.findById` round trip on every
@@ -76,20 +83,13 @@ export class RefreshTokenUseCase {
       throw new UnauthorizedError();
     }
     // Pre-check covers the expired-and-then-reused path (cheap, read-only).
-    // The atomic defence is the revokeIfActive call below.
+    // The atomic defence is the revokeIfActiveAndSave call below.
     if (!rt.isActive()) {
       throw new UnauthorizedError();
     }
 
-    // Rotation step 1 (atomic): revoke the presented row iff it is still
-    // active. A `false` result means another concurrent refresher revoked it
-    // first ⇒ treat as reuse and reject without issuing a new credential.
-    const revoked = await this.refreshTokens.revokeIfActive(claims.jti, new Date());
-    if (!revoked) {
-      throw new UnauthorizedError();
-    }
-
-    // Rotation step 2: issue a new refresh token with a fresh jti.
+    // Issue the new refresh token with a fresh jti BEFORE entering the atomic
+    // step so the insert and the conditional revoke run inside a single tx.
     const newJti = globalThis.crypto.randomUUID();
     const newRefreshValue = await this.jwt.signRefreshToken({
       sub: rt.userId,
@@ -103,7 +103,17 @@ export class RefreshTokenUseCase {
       now: new Date(),
       ttlMs: this.config.refreshTokenTtlMs,
     });
-    await this.refreshTokens.save(newRt);
+
+    // Atomic rotation: revoke the presented row iff still active AND insert
+    // the replacement in one transaction. A `false` result means another
+    // concurrent refresher revoked it first ⇒ treat as reuse and reject
+    // without leaving a half-rotated state. A throw (e.g. unique violation on
+    // the new jti) rolls back the conditional revoke so the user is never
+    // left with zero active tokens.
+    const revoked = await this.refreshTokens.revokeIfActiveAndSave(claims.jti, new Date(), newRt);
+    if (!revoked) {
+      throw new UnauthorizedError();
+    }
 
     const accessToken = await this.jwt.signAccessToken({
       sub: rt.userId,

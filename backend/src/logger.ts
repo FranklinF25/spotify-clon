@@ -7,9 +7,18 @@ import { getCurrentRequestId } from './request-context';
  * Builds the underlying pino logger used by {@link AppLogger}.
  * Exposed so tests (and bootstrap) can construct loggers with custom
  * destinations / levels.
+ *
+ * Registers `pino.stdSerializers.err` so any `err` field carried on a log line
+ * (pino convention) serializes with `message`, `stack`, and `type` instead of
+ * the `{}` placeholder `JSON.stringify` produces for non-enumerable Error
+ * properties.
  */
 export function createBaseLogger(level: string = 'info', options: LoggerOptions = {}): Logger {
-  return pino({ level, ...options });
+  return pino({
+    level,
+    serializers: { err: pino.stdSerializers.err },
+    ...options,
+  });
 }
 
 /**

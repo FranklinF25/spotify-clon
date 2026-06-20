@@ -83,6 +83,39 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepositoryPort 
     return result.count === 1;
   }
 
+  async revokeIfActiveAndSave(
+    jti: string,
+    revokedAt: Date,
+    newToken: RefreshToken,
+  ): Promise<boolean> {
+    // Interactive $transaction: the conditional revoke and the new-row insert
+    // commit together (or roll back together). If the conditional revoke
+    // matches zero rows the insert is skipped and the tx returns `false`
+    // (rotation reuse detected). If the insert throws (e.g. P2002 on the new
+    // jti) Prisma aborts the tx and the conditional revoke is rolled back so
+    // the user is never left with zero active tokens — the rotation analogue
+    // of `revokeAllAndSave` (S4 / R2-3).
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.refreshToken.updateMany({
+        where: { jti, revokedAt: null },
+        data: { revokedAt },
+      });
+      if (result.count !== 1) return false;
+      await tx.refreshToken.create({
+        data: {
+          id: newToken.id,
+          userId: newToken.userId,
+          jti: newToken.jti,
+          issuedAt: newToken.issuedAt,
+          expiresAt: newToken.expiresAt,
+          revokedAt: newToken.revokedAt,
+          createdAt: newToken.createdAt,
+        },
+      });
+      return true;
+    });
+  }
+
   async revokeAllAndSave(userId: string, newToken: RefreshToken): Promise<void> {
     // Single transaction: revoke every active row for the user, then upsert
     // the freshly issued replacement. If the upsert fails (e.g. a concurrent
