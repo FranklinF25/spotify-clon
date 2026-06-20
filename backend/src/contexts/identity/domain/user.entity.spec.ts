@@ -183,4 +183,44 @@ describe('User entity', () => {
       expect(JSON.stringify(projection)).not.toContain('hashed-secret');
     });
   });
+
+  describe('User.reconstruct', () => {
+    it('rebuilds a user from a persistence row preserving every field verbatim', () => {
+      const createdAt = new Date('2024-01-01T00:00:00.000Z');
+      const updatedAt = new Date('2024-06-01T00:00:00.000Z');
+
+      const user = User.reconstruct({
+        id: 'uid-rc-1',
+        email: 'Already@Stored.COM',
+        passwordHash: 'stored-hash',
+        displayName: '  preserved  ',
+        createdAt,
+        updatedAt,
+      });
+
+      expect(user.id).toBe('uid-rc-1');
+      // reconstruct does NOT re-run register() normalization — persistence is
+      // trusted, so email/displayName are restored byte-for-byte.
+      expect(user.email).toBe('Already@Stored.COM');
+      expect(user.displayName).toBe('  preserved  ');
+      expect(user.passwordHash).toBe('stored-hash');
+      expect(user.createdAt).toBe(createdAt);
+      expect(user.updatedAt).toBe(updatedAt);
+    });
+
+    it('yields a user whose toPrimitive still drops the hash', () => {
+      const user = User.reconstruct({
+        id: 'uid-rc-2',
+        email: 'bob@example.com',
+        passwordHash: 'leak-me-if-you-can',
+        displayName: 'Bob',
+        createdAt: fixedNow,
+        updatedAt: fixedNow,
+      });
+
+      const projection = user.toPrimitive();
+      expect(projection).toEqual({ id: 'uid-rc-2', email: 'bob@example.com', displayName: 'Bob' });
+      expect(JSON.stringify(projection)).not.toContain('leak-me-if-you-can');
+    });
+  });
 });

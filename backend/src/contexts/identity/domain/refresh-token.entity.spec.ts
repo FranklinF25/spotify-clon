@@ -156,4 +156,49 @@ describe('RefreshToken entity', () => {
       expect(token.isActive(midLife)).toBe(true);
     });
   });
+
+  describe('RefreshToken.reconstruct', () => {
+    it('rebuilds a token from a persistence row preserving revokedAt', () => {
+      const issuedAtRow = new Date('2024-01-01T00:00:00.000Z');
+      const expiresAtRow = new Date('2024-02-01T00:00:00.000Z');
+      const revokedAtRow = new Date('2024-01-15T00:00:00.000Z');
+      const createdAtRow = new Date('2024-01-01T00:00:00.000Z');
+
+      const token = RefreshToken.reconstruct({
+        id: 'rt-rc-1',
+        userId: 'user-rc',
+        jti: 'jti-rc',
+        issuedAt: issuedAtRow,
+        expiresAt: expiresAtRow,
+        revokedAt: revokedAtRow,
+        createdAt: createdAtRow,
+      });
+
+      expect(token.id).toBe('rt-rc-1');
+      expect(token.userId).toBe('user-rc');
+      expect(token.jti).toBe('jti-rc');
+      expect(token.issuedAt).toBe(issuedAtRow);
+      expect(token.expiresAt).toBe(expiresAtRow);
+      expect(token.revokedAt).toBe(revokedAtRow);
+      expect(token.createdAt).toBe(createdAtRow);
+      // A reconstructed-but-revoked token must report revoked/active correctly.
+      expect(token.isRevoked()).toBe(true);
+      expect(token.isActive(issuedAtRow)).toBe(false);
+    });
+
+    it('rebuilds an active token when revokedAt is null', () => {
+      const token = RefreshToken.reconstruct({
+        id: 'rt-rc-2',
+        userId: 'user-rc',
+        jti: 'jti-rc-2',
+        issuedAt: new Date('2024-01-01T00:00:00.000Z'),
+        expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+        revokedAt: null,
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      });
+
+      expect(token.revokedAt).toBeNull();
+      expect(token.isActive(new Date())).toBe(true);
+    });
+  });
 });
