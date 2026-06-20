@@ -66,6 +66,35 @@ export class User {
   }
 
   /**
+   * Reconstruct a `User` straight from its persistence row.
+   *
+   * Unlike {@link register}, this does NOT re-run normalization or validation:
+   * the row was written through the validating factory, so re-checking would be
+   * wasteful and would also mutate historically-stored values (e.g. legacy
+   * casing). The persistence layer is trusted as the source of truth here.
+   *
+   * This factory exists so the infrastructure layer (PrismaUserRepository) can
+   * hydrate aggregates without reaching past the private constructor.
+   */
+  static reconstruct(input: {
+    id: string;
+    email: string;
+    passwordHash: string;
+    displayName: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }): User {
+    return new User(
+      input.id,
+      input.email,
+      input.passwordHash,
+      input.displayName,
+      input.createdAt,
+      input.updatedAt,
+    );
+  }
+
+  /**
    * Renames the user. Validates the new display name against the same rule as
    * `register` and bumps `updatedAt` to `now`.
    */

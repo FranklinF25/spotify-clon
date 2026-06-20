@@ -48,6 +48,35 @@ export class RefreshToken {
   }
 
   /**
+   * Reconstruct a `RefreshToken` straight from its persistence row.
+   *
+   * No re-validation: the row was written through {@link issue} + mutations
+   * (`revoke`), and the persistence layer is trusted. `revokedAt` may be `null`
+   * (active) or a past timestamp (revoked). Exists so the infrastructure layer
+   * (PrismaRefreshTokenRepository) can hydrate aggregates without bypassing the
+   * private constructor.
+   */
+  static reconstruct(input: {
+    id: string;
+    userId: string;
+    jti: string;
+    issuedAt: Date;
+    expiresAt: Date;
+    revokedAt: Date | null;
+    createdAt: Date;
+  }): RefreshToken {
+    return new RefreshToken(
+      input.id,
+      input.userId,
+      input.jti,
+      input.issuedAt,
+      input.expiresAt,
+      input.revokedAt,
+      input.createdAt,
+    );
+  }
+
+  /**
    * Marks the token revoked at `now`. Idempotent — a second call is a no-op so
    * the original revocation timestamp is preserved (important for audit).
    */
