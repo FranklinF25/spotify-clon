@@ -11,9 +11,15 @@ import { defineConfig } from 'vitest/config';
  * - `architecture` portfolio guard enforcing DESIGN §3.4 (expanded in BF-09).
  *
  * Each project has at least one example so `pnpm test` demonstrates every layer.
+ *
+ * The top-level `include` widens Vitest's default collection (which only
+ * matches `*.spec.ts` / `*.test.ts`) so the DESIGN naming convention is
+ * honoured: `*.spec.ts` unit, `*.integration-spec.ts` infra, `*.e2e-spec.ts`
+ * HTTP. Each project then narrows that set with its own `include`.
  */
 export default defineConfig({
   test: {
+    include: ['**/*.spec.ts', '**/*.integration-spec.ts', '**/*.e2e-spec.ts'],
     projects: [
       {
         test: {

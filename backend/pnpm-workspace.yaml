@@ -1,8 +1,11 @@
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  cpu-features: false
   esbuild: true
   prisma: true
+  protobufjs: false
+  ssh2: false
   unrs-resolver: true
 onlyBuiltDependencies:
   - '@prisma/client'
