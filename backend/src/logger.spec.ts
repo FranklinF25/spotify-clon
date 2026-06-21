@@ -16,6 +16,25 @@ function capturingLogger(sink: string[]): pino.Logger {
   return pino({ level: 'info' }, stream);
 }
 
+/**
+ * Same as {@link capturingLogger} but registers `pino.stdSerializers.err`,
+ * mirroring the production {@link createBaseLogger}. Used to prove that
+ * `err` only serializes when it lands at the TOP LEVEL of the pino merging
+ * object — pino runs serializers exclusively on top-level keys.
+ */
+function capturingLoggerWithSerializers(sink: string[]): pino.Logger {
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding, callback): void {
+      sink.push(chunk.toString());
+      callback();
+    },
+  });
+  return pino(
+    { level: 'info', serializers: { err: pino.stdSerializers.err } },
+    stream,
+  );
+}
+
 describe('RequestIdMiddleware', () => {
   it('honors an incoming x-request-id header and echoes it on the response', () => {
     const middleware = new RequestIdMiddleware();
@@ -110,5 +129,83 @@ describe('AppLogger request correlation', () => {
   it('createBaseLogger returns a usable pino logger', () => {
     const base = createBaseLogger('warn');
     expect(base.level).toBe('warn');
+  });
+});
+
+describe('AppLogger structured-arg flattening (R3-1)', () => {
+  // Regression: before R3-1, AppLogger.error(msg, ...optional) wrapped every
+  // optional arg under `{ msg, optional: [...] }`. pino serializers ONLY run
+  // on top-level keys of the merging object, so an `err` nested at
+  // `optional[0].err` serialized to `{}` and the original error vanished
+  // from the logs. The fix flattens structured keys (and Errors) to the top
+  // level so `pino.stdSerializers.err` fires.
+
+  it('hoists a `{ err, path }` arg to the top level so the err serializer fires', () => {
+    const sink: string[] = [];
+    const logger = new AppLogger(capturingLoggerWithSerializers(sink));
+
+    logger.error('Unhandled exception', { err: new Error('boom'), path: '/x' });
+
+    expect(sink).toHaveLength(1);
+    const parsed = JSON.parse(sink[0] as string) as {
+      msg?: string;
+      err?: { message?: string; stack?: string; type?: string };
+      path?: string;
+      optional?: unknown[];
+    };
+
+    expect(parsed.msg).toBe('Unhandled exception');
+    // If the serializer never fires, `err` serializes to `{}` and these fail.
+    expect(parsed.err?.message).toBe('boom');
+    expect(typeof parsed.err?.stack).toBe('string');
+    expect(parsed.err?.stack).not.toBe('');
+    expect(parsed.err?.type).toBe('Error');
+    // Non-Error structured keys ride along at the top level too.
+    expect(parsed.path).toBe('/x');
+    // Nothing should be buried under the legacy `optional` array.
+    expect(parsed.optional).toBeUndefined();
+  });
+
+  it('hoists a bare Error arg to top-level err so the serializer fires', () => {
+    const sink: string[] = [];
+    const logger = new AppLogger(capturingLoggerWithSerializers(sink));
+
+    logger.error('failure', new Error('bare-boom'));
+
+    const parsed = JSON.parse(sink[0] as string) as {
+      err?: { message?: string; type?: string };
+      optional?: unknown[];
+    };
+    expect(parsed.err?.message).toBe('bare-boom');
+    expect(parsed.err?.type).toBe('Error');
+    expect(parsed.optional).toBeUndefined();
+  });
+
+  it('keeps collecting primitive args under `optional` (escape hatch unchanged)', () => {
+    const sink: string[] = [];
+    const logger = new AppLogger(capturingLoggerWithSerializers(sink));
+
+    logger.error('something happened', 'extra-context', 42);
+
+    const parsed = JSON.parse(sink[0] as string) as {
+      msg?: string;
+      optional?: unknown[];
+    };
+    expect(parsed.msg).toBe('something happened');
+    expect(parsed.optional).toEqual(['extra-context', 42]);
+  });
+
+  it('omits the optional key entirely when no primitive args are passed', () => {
+    const sink: string[] = [];
+    const logger = new AppLogger(capturingLoggerWithSerializers(sink));
+
+    logger.warn('just a message');
+
+    const parsed = JSON.parse(sink[0] as string) as {
+      msg?: string;
+      optional?: unknown[];
+    };
+    expect(parsed.msg).toBe('just a message');
+    expect(parsed.optional).toBeUndefined();
   });
 });

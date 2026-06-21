@@ -42,23 +42,53 @@ export class AppLogger implements LoggerService {
     return requestId ? this.logger.child({ requestId }) : this.logger;
   }
 
+  /**
+   * Builds the pino merging object for a string-first call.
+   *
+   * Structured keys (plain objects) and Errors are HOISTED to the top level
+   * so pino serializers fire on them — pino only invokes serializers for
+   * top-level keys of the merging object, never nested ones. A call like
+   * `error('Unhandled exception', { err, path })` therefore produces
+   * `{ msg, err, path }`, where `err` is picked up by
+   * `pino.stdSerializers.err` and serialized with `message`/`stack`/`type`.
+   *
+   * Primitive args (strings, numbers, arrays, ...) are still collected under
+   * `optional` as an escape hatch for ad-hoc context that doesn't fit a
+   * structured key.
+   */
+  private buildMerge(message: unknown, optional: unknown[]): Record<string, unknown> {
+    const obj: Record<string, unknown> = { msg: message };
+    const rest: unknown[] = [];
+    for (const arg of optional) {
+      if (arg instanceof Error) {
+        obj.err = arg;
+      } else if (typeof arg === 'object' && arg !== null && !Array.isArray(arg)) {
+        Object.assign(obj, arg);
+      } else {
+        rest.push(arg);
+      }
+    }
+    if (rest.length > 0) obj.optional = rest;
+    return obj;
+  }
+
   log(message: unknown, ...optional: unknown[]): void {
-    this.contextual().info({ msg: message, optional });
+    this.contextual().info(this.buildMerge(message, optional));
   }
 
   error(message: unknown, ...optional: unknown[]): void {
-    this.contextual().error({ msg: message, optional });
+    this.contextual().error(this.buildMerge(message, optional));
   }
 
   warn(message: unknown, ...optional: unknown[]): void {
-    this.contextual().warn({ msg: message, optional });
+    this.contextual().warn(this.buildMerge(message, optional));
   }
 
   debug(message: unknown, ...optional: unknown[]): void {
-    this.contextual().debug({ msg: message, optional });
+    this.contextual().debug(this.buildMerge(message, optional));
   }
 
   verbose(message: unknown, ...optional: unknown[]): void {
-    this.contextual().trace({ msg: message, optional });
+    this.contextual().trace(this.buildMerge(message, optional));
   }
 }
