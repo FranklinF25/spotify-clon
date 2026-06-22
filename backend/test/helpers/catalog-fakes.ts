@@ -2,7 +2,7 @@ import type {
   CatalogRepositoryPort,
   ListInput,
   SearchInput,
-} from '../src/contexts/catalog/domain/ports/catalog-repository.port';
+} from '../../src/contexts/catalog/domain/ports/catalog-repository.port';
 import type {
   AlbumDetail,
   AlbumSummary,
@@ -11,10 +11,10 @@ import type {
   PaginatedResult,
   SearchResult,
   TrackSummary,
-} from '../src/contexts/catalog/domain/read-models';
-import { Album } from '../src/contexts/catalog/domain/album.entity';
-import { Artist } from '../src/contexts/catalog/domain/artist.entity';
-import { Track } from '../src/contexts/catalog/domain/track.entity';
+} from '../../src/contexts/catalog/domain/read-models';
+import { Album } from '../../src/contexts/catalog/domain/album.entity';
+import { Artist } from '../../src/contexts/catalog/domain/artist.entity';
+import { Track } from '../../src/contexts/catalog/domain/track.entity';
 
 /**
  * Hand-written in-memory fake for the catalog use-case specs (CAT-PR2a-07).
