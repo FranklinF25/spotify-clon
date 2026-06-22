@@ -35,6 +35,11 @@ const IDENTITY_CONFIG = Symbol('IDENTITY_CONFIG');
  * `PrismaClient` is provided by the global `PrismaModule` (single connection
  * pool per process) — imported here so the repositories can resolve it without
  * the AppModule having to re-declare it.
+ *
+ * `JwtAuthGuard` + `NestJwtSigner` are EXPORTED so other bounded contexts
+ * (catalog, future playback) can attach the same JWT Bearer check to their
+ * routes. Auth is a cross-cutting concern; the guard is a shared infrastructure
+ * artifact, not identity-private state.
  */
 @Module({
   imports: [PrismaModule],
@@ -119,5 +124,6 @@ const IDENTITY_CONFIG = Symbol('IDENTITY_CONFIG');
 
     JwtAuthGuard,
   ],
+  exports: [JwtAuthGuard, NestJwtSigner],
 })
 export class AuthModule {}
