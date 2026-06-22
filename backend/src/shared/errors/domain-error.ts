@@ -1,9 +1,11 @@
 /**
  * Stable error code vocabulary shared across the API surface (DESIGN §4.3).
  *
- * PR-1 adds `INVALID_PAGINATION` so `InvalidPaginationError` (shared/pagination.ts)
- * satisfies the `DomainError` contract. PR-2a will extend this further with
- * `INVALID_QUERY` (catalog search).
+ * Catalog additions:
+ *  - `INVALID_PAGINATION` (PR-1) — `InvalidPaginationError` (shared/pagination.ts).
+ *  - `INVALID_QUERY` (PR-2a) — `InvalidQueryError` (catalog search empty-q).
+ * `NOT_FOUND` was already in the vocabulary; catalog reuses it via
+ * `NotFoundError` rather than introducing a catalog-specific code.
  */
 export type ErrorCode =
   | 'VALIDATION_ERROR'
@@ -12,7 +14,8 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'INTERNAL_ERROR'
-  | 'INVALID_PAGINATION';
+  | 'INVALID_PAGINATION'
+  | 'INVALID_QUERY';
 
 /**
  * Field-level detail attached to validation errors.
