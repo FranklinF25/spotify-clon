@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import ms, { type StringValue } from 'ms';
 
 import { type EnvConfig, loadConfig } from '../../../config';
+import { PrismaModule } from '../../../shared/prisma.module';
 import { LoginUseCase } from '../application/login.use-case';
 import { LogoutUseCase } from '../application/logout.use-case';
 import { RefreshTokenUseCase } from '../application/refresh-token.use-case';
@@ -30,18 +31,17 @@ const IDENTITY_CONFIG = Symbol('IDENTITY_CONFIG');
  * are each built with their port dependencies + the refresh TTL (derived from
  * `JWT_REFRESH_TTL` so the DB row's `expires_at` stays in lockstep with the
  * JWT `exp`). The controller and JwtAuthGuard resolve everything by class DI.
+ *
+ * `PrismaClient` is provided by the global `PrismaModule` (single connection
+ * pool per process) — imported here so the repositories can resolve it without
+ * the AppModule having to re-declare it.
  */
 @Module({
+  imports: [PrismaModule],
   controllers: [AuthController],
   providers: [
     { provide: IDENTITY_CONFIG, useFactory: (): EnvConfig => loadConfig() },
 
-    {
-      provide: PrismaClient,
-      inject: [IDENTITY_CONFIG],
-      useFactory: (cfg: EnvConfig) =>
-        new PrismaClient({ datasources: { db: { url: cfg.DATABASE_URL } } }),
-    },
     {
       provide: PrismaUserRepository,
       inject: [PrismaClient],
