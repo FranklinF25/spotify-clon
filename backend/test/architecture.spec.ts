@@ -180,7 +180,7 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('declares the four expected Driven Ports as interfaces under domain/ports', () => {
+  it('declares the expected Driven Ports as interfaces under domain/ports', () => {
     const expected = [
       {
         name: 'UserRepositoryPort',
@@ -197,6 +197,10 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
       {
         name: 'JwtSignerPort',
         path: 'contexts/identity/domain/ports/jwt-signer.port.ts',
+      },
+      {
+        name: 'CatalogRepositoryPort',
+        path: 'contexts/catalog/domain/ports/catalog-repository.port.ts',
       },
     ] as const;
 
@@ -263,5 +267,76 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
       ).toContain(table);
     }
     expect(source, 'truncate must use RESTART IDENTITY CASCADE').toContain('RESTART IDENTITY CASCADE');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Catalog PR-2a extensions (CAT-PR2a-13, per R2-CRIT-3).
+  // These four assertions land here — NOT in PR-1 — because they guard catalog
+  // domain artefacts (entities / read-models / port / shared pagination) that
+  // only exist after PR-2a. NO search assertions yet (those land in PR-3c).
+  // ---------------------------------------------------------------------------
+
+  it('requires catalog entities to expose static reconstruct methods (CAT-PR2a-13)', () => {
+    const expected = [
+      { name: 'Artist', path: 'contexts/catalog/domain/artist.entity.ts' },
+      { name: 'Album', path: 'contexts/catalog/domain/album.entity.ts' },
+      { name: 'Track', path: 'contexts/catalog/domain/track.entity.ts' },
+    ] as const;
+
+    for (const { name, path } of expected) {
+      const absolute = resolve(srcRoot, path);
+      expect(existsSync(absolute), `expected entity file ${path}`).toBe(true);
+      const source = loadSourceFile(absolute);
+
+      const cls = source
+        .getClasses()
+        .find((c) => c.getName() === name);
+      expect(cls, `${name} class must exist in ${path}`).toBeDefined();
+
+      // `reconstruct` MUST be declared as a static method on the class.
+      const reconstruct = cls!.getMethods().find((m) => m.getName() === 'reconstruct');
+      expect(reconstruct, `${name} must declare a reconstruct() method`).toBeDefined();
+      expect(
+        reconstruct!.getScope(),
+        `${name}.reconstruct must be static`,
+      ).toBe('public');
+      // ts-morph reports static methods via isStatic — getScope returns the
+      // access modifier, so also assert isStatic directly.
+      expect(reconstruct!.isStatic(), `${name}.reconstruct must be static`).toBe(true);
+    }
+  });
+
+  it('catalog read-models live in domain and stay framework-free (CAT-PR2a-13)', () => {
+    const readModelsPath = resolve(srcRoot, 'contexts/catalog/domain/read-models.ts');
+    expect(existsSync(readModelsPath), 'contexts/catalog/domain/read-models.ts must exist').toBe(true);
+
+    const source = loadSourceFile(readModelsPath);
+    const forbidden = ['@prisma/client', '@nestjs/common', '@nestjs/core', 'prisma'];
+    for (const declaration of source.getImportDeclarations()) {
+      const specifier = declaration.getModuleSpecifierValue();
+      for (const banned of forbidden) {
+        expect(
+          specifier,
+          `catalog read-models must not import "${banned}" (pure TS projection types)`,
+        ).not.toContain(banned);
+      }
+    }
+  });
+
+  it('shared/pagination.ts stays framework-free (CAT-PR2a-13)', () => {
+    const paginationPath = resolve(srcRoot, 'shared/pagination.ts');
+    expect(existsSync(paginationPath), 'shared/pagination.ts must exist').toBe(true);
+
+    const source = loadSourceFile(paginationPath);
+    const forbidden = ['@prisma/client', '@nestjs/common', '@nestjs/core', 'prisma'];
+    for (const declaration of source.getImportDeclarations()) {
+      const specifier = declaration.getModuleSpecifierValue();
+      for (const banned of forbidden) {
+        expect(
+          specifier,
+          `shared/pagination.ts must not import "${banned}" (single source of truth for DTO + use cases)`,
+        ).not.toContain(banned);
+      }
+    }
   });
 });
