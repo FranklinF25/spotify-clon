@@ -37,7 +37,11 @@ export default defineConfig({
         test: {
           name: 'integration',
           environment: 'node',
-          include: ['test/examples/infrastructure.example.spec.ts', '**/*.integration-spec.ts'],
+          include: [
+            'test/examples/infrastructure.example.spec.ts',
+            '**/*.integration-spec.ts',
+            'prisma/**/*.spec.ts',
+          ],
           setupFiles: ['test/vitest.setup.ts'],
         },
       },

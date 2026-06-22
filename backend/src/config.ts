@@ -16,6 +16,14 @@ const booleanString = z
  * Every variable the backend depends on is declared here with a Zod rule.
  * Optional operational values carry safe defaults; security-sensitive and
  * required values (DB url, JWT secrets) MUST be provided by the environment.
+ *
+ * NOTE (R2-CRIT-4 + catalog DESIGN §Architecture Decisions / Pagination
+ * constants row): pagination defaults and caps are NOT env-tunable. They live
+ * as compile-time constants in `src/shared/pagination.ts`
+ * (`DEFAULT_PAGE_SIZE = 20`, `MAX_PAGE_SIZE = 100`, `MAX_PAGE_INDEX = 1_000_000`).
+ * The spec pins the default at 20 and the cap at 100; exposing env knobs would
+ * let operators widen the contract. The catalog context owns no env-driven
+ * config — no `CATALOG_*` variables are declared here.
  */
 export const configSchema = z
   .object({

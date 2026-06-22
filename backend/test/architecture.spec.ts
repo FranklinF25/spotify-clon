@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { Project } from 'ts-morph';
 import { describe, expect, it } from 'vitest';
@@ -15,6 +15,12 @@ import { describe, expect, it } from 'vitest';
  *
  * It MUST stay green against the current empty identity tree and grow as
  * identity lands — violations from PR-2 and PR-3 will fail this suite.
+ *
+ * Catalog PR-1 extensions (per DESIGN §Architecture portfolio test extension):
+ *  - test-db.ts applyMigration iterates every migration folder;
+ *  - test-db.ts truncate covers catalog tables (tracks / albums / artists);
+ * Catalog port / reconstruct / read-models / shared-pagination framework-free
+ * assertions land in PR-2a (CAT-PR2a-13) per R2-CRIT-3.
  */
 const srcRoot = resolve(process.cwd(), 'src');
 
@@ -209,5 +215,53 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
         .filter((n): n is string => Boolean(n) && n === name);
       expect(classesNamedPort, `${name} must not be a class`).toEqual([]);
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Catalog PR-1 extensions (DESIGN §Architecture portfolio test extension).
+  // These two assertions verify the test-harness refactor (CAT-PR1-08) so
+  // future contexts inherit a working applyMigration + truncate. The catalog
+  // port / reconstruct / read-models / shared-pagination framework-free
+  // assertions land in PR-2a (CAT-PR2a-13) per R2-CRIT-3 — DO NOT add them
+  // here in PR-1.
+  // ---------------------------------------------------------------------------
+
+  it('test-db applyMigration reads every prisma/migrations folder in lexicographic order (CAT-PR1-08)', () => {
+    const testDbPath = resolve(process.cwd(), 'test/helpers/test-db.ts');
+    expect(existsSync(testDbPath), 'test/helpers/test-db.ts must exist').toBe(true);
+    const source = readFileSync(testDbPath, 'utf8');
+
+    // readdirSync + sort — the iterate-all refactor (CAT-PR1-08). The old
+    // single-folder implementation hard-coded `0000_init` instead.
+    expect(source, 'applyMigration must call readdirSync on the migrations root').toContain(
+      'readdirSync',
+    );
+    expect(source, 'applyMigration must sort folders so 0000_init runs before 0001_catalog').toContain(
+      '.sort()',
+    );
+    // No remaining hard-coded `0000_init` path — the refactor must iterate.
+    expect(
+      source,
+      'applyMigration must not hard-code the 0000_init path (single-folder legacy)',
+    ).not.toContain("'prisma/migrations/0000_init/migration.sql'");
+  });
+
+  it('test-db truncate covers catalog tables (tracks, albums, artists) plus identity tables (CAT-PR1-08)', () => {
+    const testDbPath = resolve(process.cwd(), 'test/helpers/test-db.ts');
+    expect(existsSync(testDbPath), 'test/helpers/test-db.ts must exist').toBe(true);
+    const source = readFileSync(testDbPath, 'utf8');
+
+    // Every catalog + identity table must be in the TRUNCATE statement.
+    // Order matters: catalog tables are truncated first so the FK CASCADE has
+    // nothing to descend into (defensive — the explicit CASCADE would handle
+    // it either way).
+    const requiredTables = ['"tracks"', '"albums"', '"artists"', '"refresh_tokens"', '"users"'];
+    for (const table of requiredTables) {
+      expect(
+        source,
+        `truncate must include ${table} so tests start from a clean slate`,
+      ).toContain(table);
+    }
+    expect(source, 'truncate must use RESTART IDENTITY CASCADE').toContain('RESTART IDENTITY CASCADE');
   });
 });

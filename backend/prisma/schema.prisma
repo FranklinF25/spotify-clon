@@ -43,3 +43,57 @@ model RefreshToken {
   @@index([userId])
   @@map("refresh_tokens")
 }
+
+/// Read-only music metadata. Mutation only via the deterministic seed script.
+/// Catalog bounded context (DESIGN §Catalog Data Model).
+model Artist {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  bio       String?
+  imageUrl  String?  @map("image_url")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  albums Album[]
+
+  // Generated tsvector column — owned by raw SQL in migration 0001_catalog,
+  // invisible to Prisma Client. The GIN index on this column is also declared
+  // in the migration SQL (Prisma cannot express GIN-on-generated-column in
+  // schema syntax).
+  nameTsv Unsupported("tsvector")? @map("name_tsv")
+
+  @@map("artists")
+}
+
+model Album {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String
+  releaseYear Int?     @map("release_year")
+  coverUrl    String?  @map("cover_url")
+  artistId    String   @map("artist_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  tracks Track[]
+
+  titleTsv Unsupported("tsvector")? @map("title_tsv")
+
+  @@index([artistId])
+  @@map("albums")
+}
+
+model Track {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title           String
+  durationSeconds Int      @map("duration_seconds")
+  filePath        String   @map("file_path")
+  trackNumber     Int      @map("track_number")
+  albumId         String   @map("album_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  titleTsv Unsupported("tsvector")? @map("title_tsv")
+
+  @@index([albumId])
+  @@map("tracks")
+}

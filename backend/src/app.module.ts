@@ -7,6 +7,7 @@ import { GlobalExceptionFilter } from './exception.filter';
 import { HealthController } from './health.controller';
 import { AppLogger } from './logger';
 import { RequestIdMiddleware } from './request-id.middleware';
+import { PrismaModule } from './shared/prisma.module';
 
 /**
  * DI token for the validated environment configuration.
@@ -21,10 +22,11 @@ export const ENV_CONFIG = Symbol('ENV_CONFIG');
  *  - global exception filter (DESIGN 4.3 envelope),
  *  - request-id middleware on every route,
  *  - health endpoint,
+ *  - global PrismaModule (single PrismaClient / single connection pool),
  * and imports the identity bounded context (AuthModule).
  */
 @Module({
-  imports: [AuthModule],
+  imports: [PrismaModule, AuthModule],
   controllers: [HealthController],
   providers: [
     { provide: ENV_CONFIG, useFactory: (): EnvConfig => loadConfig() },
