@@ -90,13 +90,22 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
     expect(existsSync(resolve(srcRoot, 'shared'))).toBe(true);
   });
 
-  it('keeps the domain layer free of any non-relative (framework) import', () => {
+  it('keeps the domain layer free of any non-relative RUNTIME (framework) import', () => {
+    // REQ-BF-008 + CRIT-2 — type-only imports (`import type`) are erased at
+    // compile time and therefore do NOT contaminate the domain at runtime.
+    // The architecture test filters them out via ts-morph's
+    // `importClause.isTypeOnly()`. This is what permits playback's
+    // `AudioStream = Readable` alias (`import type { Readable } from
+    // 'node:stream'`) while still banning runtime framework imports.
     const violations: string[] = [];
     for (const file of domainFiles) {
       const source = loadSourceFile(file);
       for (const declaration of source.getImportDeclarations()) {
         const specifier = declaration.getModuleSpecifierValue();
         if (!specifier.startsWith('.')) {
+          const importClause = declaration.getImportClause();
+          const isTypeOnly = importClause?.isTypeOnly() ?? false;
+          if (isTypeOnly) continue; // allowed: erased at compile time
           violations.push(relOf(file) + ' imports "' + specifier + '"');
         }
       }
@@ -202,6 +211,17 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
         name: 'CatalogRepositoryPort',
         path: 'contexts/catalog/domain/ports/catalog-repository.port.ts',
       },
+      // Playback driven ports (PB-PR1-04 + PB-PR1-05). Catalog's port is
+      // re-exported via `playback/domain/ports/catalog-repo.port.ts` shim —
+      // it stays declared in catalog's tree, so it is NOT re-listed here.
+      {
+        name: 'AudioStoragePort',
+        path: 'contexts/playback/domain/ports/audio-storage.port.ts',
+      },
+      {
+        name: 'RangeParserPort',
+        path: 'contexts/playback/domain/ports/range-parser.port.ts',
+      },
     ] as const;
 
     for (const { name, path } of expected) {
@@ -218,6 +238,38 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
         .map((c) => c.getName())
         .filter((n): n is string => Boolean(n) && n === name);
       expect(classesNamedPort, `${name} must not be a class`).toEqual([]);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Playback PR-1 extensions (PB-PR1-14) — assert the playback domain types
+  // are exported at their canonical path. These four types are the contract
+  // the use case (PB-PR1-12), the controller (PR-2), and the ESLint rule
+  // (PB-PR1-13) all depend on. Locked once and verified here so a future
+  // refactor cannot silently rename them out from under callers.
+  // ---------------------------------------------------------------------------
+
+  it('exports the four playback domain types from contexts/playback/domain/types.ts', () => {
+    const typesPath = 'contexts/playback/domain/types.ts';
+    const absolute = resolve(srcRoot, typesPath);
+    expect(existsSync(absolute), `expected types file ${typesPath}`).toBe(true);
+
+    const source = loadSourceFile(absolute);
+    const exported = source.getExportedDeclarations();
+    const names = new Set<string>();
+    for (const declarations of exported.values()) {
+      for (const d of declarations) {
+        const name = d.getSymbolOrThrow().getName();
+        names.add(name);
+      }
+    }
+
+    const expected = ['AudioStream', 'StreamResult', 'RangeResult', 'RangeParseResult'];
+    for (const name of expected) {
+      expect(
+        names.has(name),
+        `${name} must be exported from ${typesPath} (got: ${[...names].sort().join(', ')})`,
+      ).toBe(true);
     }
   });
 
