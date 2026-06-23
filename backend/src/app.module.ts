@@ -2,6 +2,7 @@ import { type MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
 import { AuthModule } from './contexts/identity/infrastructure/auth.module';
+import { CatalogModule } from './contexts/catalog/infrastructure/catalog.module';
 import { loadConfig, type EnvConfig } from './config';
 import { GlobalExceptionFilter } from './exception.filter';
 import { HealthController } from './health.controller';
@@ -23,10 +24,10 @@ export const ENV_CONFIG = Symbol('ENV_CONFIG');
  *  - request-id middleware on every route,
  *  - health endpoint,
  *  - global PrismaModule (single PrismaClient / single connection pool),
- * and imports the identity bounded context (AuthModule).
+ * and imports the bounded contexts (identity, catalog).
  */
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, CatalogModule],
   controllers: [HealthController],
   providers: [
     { provide: ENV_CONFIG, useFactory: (): EnvConfig => loadConfig() },
