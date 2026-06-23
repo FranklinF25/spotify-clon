@@ -35,6 +35,11 @@ export async function bootAuthApp(): Promise<AuthE2eContext> {
   process.env.JWT_REFRESH_SECRET = E2E_REFRESH_SECRET;
   process.env.JWT_ISSUER = 'spotify-clon';
   process.env.JWT_AUDIENCE = 'spotify-clon-users';
+  // Required by AppConfig (PR-1 added AUDIO_STORAGE_PATH as a fail-fast
+  // field). The identity e2e suite does NOT exercise playback; the
+  // placeholder is just enough to let AppConfig boot. PR-2's playback
+  // e2e helper will set this to a real fixtures path.
+  process.env.AUDIO_STORAGE_PATH = '/tmp/playback-unused';
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();

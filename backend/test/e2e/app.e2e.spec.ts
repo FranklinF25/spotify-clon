@@ -17,6 +17,10 @@ function seedEnv(): void {
   process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/spotify_clone';
   process.env.JWT_ACCESS_SECRET = 'a'.repeat(48);
   process.env.JWT_REFRESH_SECRET = 'b'.repeat(48);
+  // Required by AppConfig (PR-1 added AUDIO_STORAGE_PATH as a fail-fast
+  // field). The foundation wiring smoke test does NOT exercise playback;
+  // the placeholder is just enough to let AppConfig boot.
+  process.env.AUDIO_STORAGE_PATH = '/tmp/playback-unused';
 }
 
 describe('AppModule foundation wiring', () => {
