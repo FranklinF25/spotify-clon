@@ -6,6 +6,11 @@ const validBase = {
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/spotify_clone',
   JWT_ACCESS_SECRET: 'a'.repeat(48),
   JWT_REFRESH_SECRET: 'b'.repeat(48),
+  // Required by the playback bounded context (REQ-PLAY-008, fail-fast like
+  // DATABASE_URL). The e2e + unit specs never exercise the playback tree
+  // from this fixture, but AppConfig rejects the whole config if the field
+  // is missing — so a valid placeholder is required.
+  AUDIO_STORAGE_PATH: '/tmp/playback-unused',
 } as const;
 
 describe('loadConfig', () => {

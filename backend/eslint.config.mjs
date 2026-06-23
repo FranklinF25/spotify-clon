@@ -88,10 +88,21 @@ export default tseslint.config(
   // DESIGN §3.4 rule 1 — domain must not import frameworks or node: built-ins.
   // (Deep "no external imports" is reinforced by the BF-09 portfolio test; this
   //  catches the obvious offenders at lint time.)
+  //
+  // CRIT-2 (Judgment Day R2): migrated from stock `no-restricted-imports` to
+  // `@typescript-eslint/no-restricted-imports` so `allowTypeImports: true` can
+  // be set on the `node:*` pattern. The domain `types.ts` needs
+  // `import type { Readable } from 'node:stream'` (compile-time erased —
+  // `AudioStream = Readable` type alias). Stock `no-restricted-imports` does
+  // NOT distinguish `import type` from runtime imports; the typescript-eslint
+  // variant does. Only `node:*` opens for type-only imports — type-only
+  // imports from `@nestjs/*`, `@prisma/*`, `express`, `rxjs`, `pino` stay
+  // banned (domain stays framework-free even at the type level per REQ-BF-009
+  // scenario "Domain type-only imports from non-node specifiers are blocked").
   {
     files: ['src/contexts/*/domain/**/*.ts'],
     rules: {
-      'no-restricted-imports': [
+      '@typescript-eslint/no-restricted-imports': [
         'error',
         {
           paths: [
@@ -111,7 +122,11 @@ export default tseslint.config(
             {
               group: ['node:*'],
               message:
-                'Domain layer must not import node: built-ins (use globalThis APIs).',
+                'Domain layer must not import node: built-ins at runtime (use globalThis APIs).',
+              // Type-only imports from node:* are permitted (erased at compile
+              // time → no runtime contamination). Required by playback's
+              // `AudioStream = Readable` alias.
+              allowTypeImports: true,
             },
           ],
         },

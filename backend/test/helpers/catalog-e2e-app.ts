@@ -59,6 +59,11 @@ export async function startCatalogE2E(): Promise<CatalogE2eContext> {
   process.env.JWT_REFRESH_SECRET = E2E_REFRESH_SECRET;
   process.env.JWT_ISSUER = 'spotify-clon';
   process.env.JWT_AUDIENCE = 'spotify-clon-users';
+  // Required by AppConfig (PR-1 added AUDIO_STORAGE_PATH as a fail-fast
+  // field). The catalog e2e suite does NOT exercise playback; the
+  // placeholder is just enough to let AppConfig boot. PR-2's playback
+  // e2e helper will set this to a real fixtures path.
+  process.env.AUDIO_STORAGE_PATH = '/tmp/playback-unused';
 
   // Seed the canonical catalog dataset (5 × 10 × 40) BEFORE the app boots so
   // every read-only spec sees the same fixture set on the first request.

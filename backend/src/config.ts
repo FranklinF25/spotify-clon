@@ -52,6 +52,14 @@ export const configSchema = z
     ARGON2_MEMORY_COST: z.coerce.number().int().positive().default(19456),
     ARGON2_TIME_COST: z.coerce.number().int().positive().default(2),
     ARGON2_PARALLELISM: z.coerce.number().int().positive().default(1),
+
+    // Playback audio root (REQ-PLAY-008). Fail-fast, NO default — mirrors
+    // DATABASE_URL. The value MUST be the PARENT of the audio dir (C8 fix):
+    // seed.ts writes `filePath` rooted at `/audio/...` and `FsAudioStorage.resolve`
+    // strips the leading `/`, so `AUDIO_STORAGE_PATH=/data` resolves a seed
+    // path `/audio/album/track.mp3` to `/data/audio/album/track.mp3`. Setting
+    // this to `/data/audio` would double the segment and never find a file.
+    AUDIO_STORAGE_PATH: z.string().min(1),
   })
   .superRefine((data, ctx) => {
     // Spec: the refresh cookie MUST be Secure in production. An explicit
