@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
 
 import { GetAlbumUseCase } from '../application/get-album.use-case';
 import { GetArtistUseCase } from '../application/get-artist.use-case';
@@ -23,32 +24,57 @@ import { PrismaCatalogRepository } from './prisma-catalog.repository';
  * dependency. Auth is a cross-cutting concern; `AuthModule` exports the
  * guard for reuse by other bounded contexts (catalog, future playback).
  *
- * `PrismaCatalogRepository` is bound via `useClass` so NestJS instantiates it
- * with `PrismaClient` injected through its constructor — plain class, no
- * `@Injectable`, mirrors `PrismaUserRepository`.
- *
- * The 5 use cases use NestJS shorthand provider syntax — Nest resolves
- * constructor dependencies by class metadata. The use cases depend on the
- * concrete `PrismaCatalogRepository` class token (NOT a separate port token),
- * which is exactly what the useClass provider above exposes.
+ * Every provider uses EXPLICIT `useFactory` + `inject` instead of `useClass`
+ * shorthand. Reason: under Vitest, esbuild does NOT emit `design:paramtypes`
+ * reflect metadata, so NestJS DI resolves constructor params to `undefined`
+ * and catalog requests 500 with INTERNAL_ERROR. Identity's `AuthModule`
+ * follows the same explicit pattern (per `JwtAuthGuard` comment block —
+ * same esbuild caveat). Production runtime (tsc emits metadata) is
+ * unaffected, but tests are the portfolio gate, so explicit wins.
  *
  * NO `CATALOG_CONFIG` token (catalog has no env-driven config — R2-CRIT-4
  * dropped every catalog env knob). Identity's `IDENTITY_CONFIG` is
  * load-bearing there because identity has env-driven knobs (DATABASE_URL,
  * JWT secret, argon params); catalog has none.
  *
- * `SearchCatalogUseCase` will join the providers array when PR-3c lands.
+ * `SearchCatalogUseCase` will join the providers array (same shape:
+ * `inject: [PrismaCatalogRepository]`, `useFactory: (repo) => new ...`)
+ * when PR-3c lands.
  */
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [CatalogController],
   providers: [
-    { provide: PrismaCatalogRepository, useClass: PrismaCatalogRepository },
-    ListArtistsUseCase,
-    GetArtistUseCase,
-    ListAlbumsUseCase,
-    GetAlbumUseCase,
-    GetTrackUseCase,
+    {
+      provide: PrismaCatalogRepository,
+      inject: [PrismaClient],
+      useFactory: (prisma: PrismaClient) => new PrismaCatalogRepository(prisma),
+    },
+    {
+      provide: ListArtistsUseCase,
+      inject: [PrismaCatalogRepository],
+      useFactory: (repo: PrismaCatalogRepository) => new ListArtistsUseCase(repo),
+    },
+    {
+      provide: GetArtistUseCase,
+      inject: [PrismaCatalogRepository],
+      useFactory: (repo: PrismaCatalogRepository) => new GetArtistUseCase(repo),
+    },
+    {
+      provide: ListAlbumsUseCase,
+      inject: [PrismaCatalogRepository],
+      useFactory: (repo: PrismaCatalogRepository) => new ListAlbumsUseCase(repo),
+    },
+    {
+      provide: GetAlbumUseCase,
+      inject: [PrismaCatalogRepository],
+      useFactory: (repo: PrismaCatalogRepository) => new GetAlbumUseCase(repo),
+    },
+    {
+      provide: GetTrackUseCase,
+      inject: [PrismaCatalogRepository],
+      useFactory: (repo: PrismaCatalogRepository) => new GetTrackUseCase(repo),
+    },
   ],
 })
 export class CatalogModule {}
