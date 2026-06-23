@@ -4,17 +4,17 @@ import { APP_FILTER } from '@nestjs/core';
 import { AuthModule } from './contexts/identity/infrastructure/auth.module';
 import { CatalogModule } from './contexts/catalog/infrastructure/catalog.module';
 import { loadConfig, type EnvConfig } from './config';
+// CRIT-3 — `ENV_CONFIG` is imported (binds the value into this module's
+// local scope so the `provide: ENV_CONFIG` line below compiles) AND
+// re-exported (so existing consumers of `'./app.module'` keep resolving).
+import { ENV_CONFIG } from './config.tokens';
 import { GlobalExceptionFilter } from './exception.filter';
 import { HealthController } from './health.controller';
 import { AppLogger } from './logger';
 import { RequestIdMiddleware } from './request-id.middleware';
 import { PrismaModule } from './shared/prisma.module';
 
-/**
- * DI token for the validated environment configuration.
- * Contexts and adapters inject this instead of reading process.env directly.
- */
-export const ENV_CONFIG = Symbol('ENV_CONFIG');
+export { ENV_CONFIG } from './config.tokens';
 
 /**
  * Root application module — wires the cross-cutting foundation:
