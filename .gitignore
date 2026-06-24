@@ -30,6 +30,12 @@ audio/
 # otherwise ignore the fixture.
 !backend/test/fixtures/audio/
 !backend/test/fixtures/audio/*.mp3
+# Exception: the audio/ attribution README is tracked so contributors see
+# the legal constraints (PRD §9.1) on clone. Two layers because both the
+# `audio/` dir rule and the global `*.md` rule (line 2) would otherwise
+# ignore it. Only the README is un-ignored — actual audio bytes stay out.
+!audio/
+!audio/README.md
 
 # Logs
 *.log
