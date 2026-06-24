@@ -1,6 +1,15 @@
 # Local development compose for the Spotify clone backend.
-# Brings up PostgreSQL 16 only; run the backend on the host with `pnpm start:dev`.
-# (DESIGN section 7.1 — backend/frontend containers are optional for local dev.)
+#
+# Default posture (DESIGN section 7.1): brings up PostgreSQL 16 only —
+# run the backend on the host with `pnpm start:dev`. The `backend`
+# service below is OPT-IN via the `demo` profile so the default
+# `docker-compose up` keeps the host-run posture unchanged.
+#
+# `docker-compose --profile demo up` brings up the backend with the
+# audio mount wired (PRD section 10.5 demo flow:
+# "login → buscar → reproducir → seek"). The service block anticipates
+# a Dockerfile under ./backend (not yet landed); until then, the
+# host-run path remains the default for local dev.
 
 services:
   db:
@@ -19,6 +28,39 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # OPT-IN demo profile (PB-PR3-04 / PB-PR2-14, REQ-PLAY-008 + PRD §10.5).
+  # Run with `docker-compose --profile demo up`. Requires ./backend/Dockerfile
+  # (future work); until it lands, the host-run path stays the dev default.
+  #
+  # Audio mount math (C8 fix, DESIGN §6): the seed writes file paths
+  # rooted at `/audio/<album>/<track>.mp3`. `FsAudioStorage.resolve`
+  # strips the leading `/` and joins under `AUDIO_STORAGE_PATH`, so
+  # `AUDIO_STORAGE_PATH=/data` resolves `/audio/x/y.mp3` to
+  # `/data/audio/x/y.mp3` inside the container. The volume mount maps
+  # the repo's `./audio` directory to `/data/audio` (read-only — the
+  # service never writes audio) so the resolved path lands exactly
+  # where the file lives on disk. Setting `AUDIO_STORAGE_PATH=/data/audio`
+  # instead would double the segment to `/data/audio/audio/...` and
+  # every request would 404.
+  backend:
+    profiles: ["demo"]
+    build:
+      context: ./backend
+    container_name: spotify-clon-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/spotify_clone
+      # Parent of the audio root (NOT /data/audio — see comment above).
+      AUDIO_STORAGE_PATH: /data
+    ports:
+      - "3000:3000"
+    volumes:
+      # Read-only mount of the repo's audio/ dir → /data/audio inside
+      # the container (matches FsAudioStorage.resolve expectations).
+      - ./audio:/data/audio:ro
 
 volumes:
   db_data:
