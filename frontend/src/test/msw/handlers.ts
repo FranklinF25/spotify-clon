@@ -27,6 +27,16 @@ const sampleMp3 = readFileSync(
 const basePath = (urlWithQuery: string): string => urlWithQuery.replace(/\?.*$/, '');
 
 /**
+ * API base — mirrors `endpoints.ts` BASE. Declared here (not imported from
+ * endpoints) because the MSW `:id` param patterns below must NOT be passed
+ * through `endpoints.*.detail(':id')` — that route runs `encodeURIComponent`
+ * on the id, mangling `:id` into `%3Aid` and breaking the match. Real UUIDs
+ * are URL-safe so the encoding in `endpoints` is correct for production; only
+ * the MSW pattern literal needs the raw `:id` token.
+ */
+const API = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+
+/**
  * MSW handlers for ALL twelve slice-A endpoints (REQ-FE-005 "Every slice-A
  * endpoint has an MSW handler"). `:id` path params are echoed into the
  * response so path-id matching is deterministic regardless of the fake
@@ -74,7 +84,7 @@ export const handlers = [
     );
   }),
   http.get(
-    endpoints.artists.detail(':id'),
+    `${API}/artists/:id`,
     ({ params }) =>
       HttpResponse.json(buildArtistDetail({ id: String(params.id) })),
   ),
@@ -89,21 +99,21 @@ export const handlers = [
     );
   }),
   http.get(
-    endpoints.albums.detail(':id'),
+    `${API}/albums/:id`,
     ({ params }) =>
       HttpResponse.json(buildAlbumDetail({ id: String(params.id) })),
   ),
 
   // --- Tracks (F2/F3) ---
   http.get(
-    endpoints.tracks.detail(':id'),
+    `${API}/tracks/:id`,
     ({ params }) =>
       HttpResponse.json(buildTrack({ id: String(params.id) })),
   ),
   // Binary audio stream — the only non-JSON guarded endpoint. The blob path
   // (FE-PR1-10) consumes this through httpClient.getBlob → res.blob().
   http.get(
-    endpoints.tracks.stream(':id'),
+    `${API}/tracks/:id/stream`,
     () =>
       new HttpResponse(sampleMp3, {
         headers: { 'content-type': 'audio/mpeg' },
