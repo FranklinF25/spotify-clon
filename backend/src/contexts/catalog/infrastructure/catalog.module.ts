@@ -9,6 +9,7 @@ import { ListArtistsUseCase } from '../application/list-artists.use-case';
 import { SearchCatalogUseCase } from '../application/search-catalog.use-case';
 import { AuthModule } from '../../identity/infrastructure/auth.module';
 import { PrismaModule } from '../../../shared/prisma.module';
+import { CATALOG_REPOSITORY_PORT } from '../domain/ports/tokens';
 import { CatalogController } from './catalog.controller';
 import { PrismaCatalogRepository } from './prisma-catalog.repository';
 
@@ -38,6 +39,16 @@ import { PrismaCatalogRepository } from './prisma-catalog.repository';
  * dropped every catalog env knob). Identity's `IDENTITY_CONFIG` is
  * load-bearing there because identity has env-driven knobs (DATABASE_URL,
  * JWT secret, argon params); catalog has none.
+ *
+ * Cross-context port export (PB-PR2-02 — additive, C3 fix): the module
+ * additively binds `{ provide: CATALOG_REPOSITORY_PORT,
+ * useExisting: PrismaCatalogRepository }` and exports the token. This is
+ * the canonical way consumers (playback's `PlaybackModule`) inject the
+ * `CatalogRepositoryPort` contract WITHOUT depending on the concrete
+ * `PrismaCatalogRepository` adapter. `useExisting` aliases the existing
+ * provider — NO second instance is constructed, NO existing catalog
+ * resolution path is altered. Catalog's own use cases keep resolving
+ * `PrismaCatalogRepository` by class as before.
  */
 @Module({
   imports: [PrismaModule, AuthModule],
@@ -48,6 +59,10 @@ import { PrismaCatalogRepository } from './prisma-catalog.repository';
       inject: [PrismaClient],
       useFactory: (prisma: PrismaClient) => new PrismaCatalogRepository(prisma),
     },
+    // NEW (PB-PR2-02 — additive) — alias the existing PrismaCatalogRepository
+    // provider under the CATALOG_REPOSITORY_PORT Symbol token so cross-
+    // context consumers can inject the port contract (C3 fix).
+    { provide: CATALOG_REPOSITORY_PORT, useExisting: PrismaCatalogRepository },
     {
       provide: ListArtistsUseCase,
       inject: [PrismaCatalogRepository],
@@ -79,5 +94,10 @@ import { PrismaCatalogRepository } from './prisma-catalog.repository';
       useFactory: (repo: PrismaCatalogRepository) => new SearchCatalogUseCase(repo),
     },
   ],
+  // NEW (PB-PR2-02 — additive) — playback's `PlaybackModule` injects the
+  // port token; NestJS only resolves it across module boundaries when the
+  // producing module exports the token. Catalog previously had no exports
+  // (no other module needed anything from it); this is the first.
+  exports: [CATALOG_REPOSITORY_PORT],
 })
 export class CatalogModule {}
