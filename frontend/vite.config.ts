@@ -32,13 +32,14 @@ export default defineConfig({
       '/health': { target: 'http://localhost:3000', changeOrigin: true },
     },
   },
-  // Vitest config co-located (FE-PR1-07 adds setupFiles + the test helpers).
-  // DESIGN §10: jsdom so RTL renders; globals so specs skip the
-  // `import { describe, it, expect }` boilerplate; css:false because CSS
-  // Modules are not asserted on in Slice A.
+  // Vitest config co-located (DESIGN §10): jsdom so RTL renders; globals so
+  // specs skip the `import { describe, it, expect }` boilerplate; css:false
+  // because CSS Modules are not asserted on in Slice A; setupFiles wires
+  // jest-dom matchers + per-test cleanup/store reset (FE-PR1-07).
   test: {
     environment: 'jsdom',
     globals: true,
     css: false,
+    setupFiles: ['./src/test/setup.ts'],
   },
 });
