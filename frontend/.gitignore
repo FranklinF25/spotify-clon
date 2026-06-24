@@ -17,3 +17,9 @@ coverage
 # deterministic sample.mp3 (committed binary, not generated) is tracked.
 !src/test/fixtures/audio/
 !src/test/fixtures/audio/*.mp3
+
+# Audio source module — overrides the root `audio/` dir rule so the
+# blob-source.ts source (DESIGN §6.3 path `lib/audio/`) is tracked. The root
+# rule targets the repo-root `audio/` mount, but matches any audio/ dir.
+!src/lib/audio/
+!src/lib/audio/**
