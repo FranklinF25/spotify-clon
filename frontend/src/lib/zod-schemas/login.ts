@@ -1,0 +1,9 @@
+import { z } from 'zod';
+
+/** Login form validator (DESIGN §4.2). */
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
+
+export type LoginInput = z.infer<typeof loginSchema>;
