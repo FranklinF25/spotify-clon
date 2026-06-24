@@ -3,6 +3,7 @@ import { APP_FILTER } from '@nestjs/core';
 
 import { AuthModule } from './contexts/identity/infrastructure/auth.module';
 import { CatalogModule } from './contexts/catalog/infrastructure/catalog.module';
+import { PlaybackModule } from './contexts/playback/infrastructure/playback.module';
 import { loadConfig, type EnvConfig } from './config';
 // CRIT-3 — `ENV_CONFIG` is imported (binds the value into this module's
 // local scope so the `provide: ENV_CONFIG` line below compiles) AND
@@ -24,10 +25,10 @@ export { ENV_CONFIG } from './config.tokens';
  *  - request-id middleware on every route,
  *  - health endpoint,
  *  - global PrismaModule (single PrismaClient / single connection pool),
- * and imports the bounded contexts (identity, catalog).
+ * and imports the bounded contexts (identity, catalog, playback).
  */
 @Module({
-  imports: [PrismaModule, AuthModule, CatalogModule],
+  imports: [PrismaModule, AuthModule, CatalogModule, PlaybackModule],
   controllers: [HealthController],
   providers: [
     { provide: ENV_CONFIG, useFactory: (): EnvConfig => loadConfig() },
