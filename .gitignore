@@ -25,6 +25,11 @@ audio/
 *.ogg
 *.flac
 *.m4a
+# Exception: deterministic test-fixture mp3 used by playback e2e + integration specs.
+# Two layers because both the `audio/` dir rule and the `*.mp3` glob would
+# otherwise ignore the fixture.
+!backend/test/fixtures/audio/
+!backend/test/fixtures/audio/*.mp3
 
 # Logs
 *.log
