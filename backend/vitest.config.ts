@@ -58,7 +58,11 @@ export default defineConfig({
         test: {
           name: 'architecture',
           environment: 'node',
-          include: ['test/architecture.spec.ts'],
+          // `lint-rules.spec.ts` joins `architecture.spec.ts` here because
+          // both are portfolio-level regression guards (DESIGN §3.4 + §6
+          // rule contracts). The lint-rules spec is NOT a unit test (it
+          // drives the real ESLint flat config via the `ESLint` API).
+          include: ['test/architecture.spec.ts', 'test/lint-rules.spec.ts'],
           setupFiles: ['test/vitest.setup.ts'],
         },
       },
