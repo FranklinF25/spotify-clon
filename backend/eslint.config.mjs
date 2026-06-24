@@ -150,4 +150,66 @@ export default tseslint.config(
       ],
     },
   },
+
+  // ---------------------------------------------------------------------------
+  // Cross-context concrete-adapter ban (PB-PR3-01 / PB-PR2-12, REQ-BF-009).
+  //
+  // The first cross-context edge in the portfolio is playback → catalog.
+  // Playback MUST consume `CatalogRepositoryPort` via the
+  // `CATALOG_REPOSITORY_PORT` Symbol token (exported additively by
+  // `CatalogModule` per PB-PR2-02), NEVER the concrete
+  // `PrismaCatalogRepository` adapter directly. This rule makes any direct
+  // import of the concrete adapter a lint error in every non-catalog,
+  // non-domain context file.
+  //
+  // CRIT-1 (Judgment Day R2): stock `no-restricted-imports` has no from-file
+  // context awareness — it pattern-matches the literal import specifier
+  // string. The codebase uses RELATIVE specifiers
+  // (`'../../catalog/infrastructure/prisma-catalog.repository'`), so the
+  // `group` glob uses `**/catalog/infrastructure/prisma-catalog.repository`
+  // which the `ignore` library (used internally by ESLint) matches against
+  // the relative specifier via gitignore-style glob semantics. This was
+  // verified in PR-3's lint-fixture test (`test/lint-rules.spec.ts`).
+  //
+  // WARN-overlap (DESIGN §6): the `ignores` array exempts (a) catalog's own
+  // tree — catalog is the OWNER of its concrete adapter and may use it
+  // freely — and (b) every context's `domain/` tree — the domain rule from
+  // CRIT-2 (above) is stricter (`@typescript-eslint/no-restricted-imports`
+  // with full `paths` + `patterns`) and would otherwise be shadowed by this
+  // looser stock-`no-restricted-imports` block under flat-config's
+  // "later-rule-wins" semantics.
+  //
+  // Catalog's existing `JwtAuthGuard` import from identity stays LEGAL here:
+  // it is governed by the existing `boundaries/element-types` rule above
+  // (infrastructure → infrastructure is allowed), NOT by this rule. The
+  // concrete-adapter ban targets ONLY the catalog repository adapter.
+  // -------------------------------------------------------------------------
+  {
+    files: ['src/contexts/**/*.ts'],
+    ignores: [
+      // catalog owns its concrete adapter — may wire it internally.
+      'src/contexts/catalog/**/*.ts',
+      // domain has its own stricter rule (CRIT-2 above) — keep these
+      // disjoint so flat-config "later rule wins" doesn't shadow it.
+      'src/contexts/*/domain/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              // Glob pattern matches relative import specifiers like
+              // '../../catalog/infrastructure/prisma-catalog.repository'
+              // (ESLint delegates to the `ignore` library which applies
+              // gitignore-style glob matching, not literal string equality).
+              group: ['**/catalog/infrastructure/prisma-catalog.repository'],
+              message:
+                'Consumers must depend on the CATALOG_REPOSITORY_PORT token (injected via DI), not the concrete adapter. Cross-context coupling goes through ports.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );
