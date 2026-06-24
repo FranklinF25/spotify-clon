@@ -1,5 +1,15 @@
 import { create } from 'zustand';
-import type { UserPrimitive } from '@/types/api';
+import type {
+  AuthResponse,
+  RefreshResponse,
+  UserPrimitive,
+} from '@/types/api';
+import {
+  httpClient,
+  setBootRefreshGate,
+} from '@/lib/api/http-client';
+import { endpoints } from '@/lib/api/endpoints';
+import { useToast } from '@/components/organisms/ToastHost/toast.store';
 
 export type AuthStatus =
   | 'idle'
@@ -8,27 +18,38 @@ export type AuthStatus =
   | 'unauthenticated';
 
 /**
- * PR-1 SKELETON (DESIGN §4.3). Contains ONLY the fields + the two internal
- * seam methods the `http-client` (FE-PR1-09) mutates from outside React's
- * render tree. The 4 action methods (`register`/`login`/`logout`/
- * `refreshOnBoot`) + their specs land in FE-PR2-02 — they need the toast
- * store (FE-PR2-01) for the `PROFILE_LOAD_FAILED` non-fatal toast and the
- * full boot-flow wiring.
+ * authStore (DESIGN §4.3) — memory-only access token (REQ-FE-006) + boot-flow
+ * actions (REQ-FE-007). NO `persist` middleware: the access token lives only
+ * in memory; the backend-owned httpOnly refresh cookie is the sole auth
+ * survivor across reloads, and `refreshOnBoot` rehydrates this store on boot.
  *
- * This skeleton exists so the http-client has a real store to call
- * `_clear` / `_hydrateFromRefresh` / read `accessToken` against; the seam
- * behavior is exercised by FE-PR1-09's http-client spec.
+ * The two `_`-prefixed seam methods exist because the http-client mutates auth
+ * state from outside React's render tree (single-flight refresh success/failure
+ * — DESIGN §6.1). The store is the single mutation point; the client calls the
+ * seam, never copies state.
  *
- * NO `persist` middleware — the access token is memory-only by design
- * (REQ-FE-006 "Access token is memory-only"). The httpOnly refresh cookie
- * (backend-owned) is the only auth survivor across reloads; the boot refresh
- * rehydrates this store on app boot (FE-PR2-02).
+ * Boot-flow Judgment-Day fixes encoded here (see refreshOnBoot):
+ *  - R2-2a: register/login + POST /auth/refresh + GET /me pass
+ *    { skipAuthRefresh: true } so they never await the boot gate (no
+ *    self-deadlock: gate awaits /me; /me awaits gate → permanent Splash).
+ *  - R2-3: a transient /me failure AFTER a successful refresh keeps the token
+ *    + surfaces a non-fatal toast (no logout on flaky wifi).
+ *  - logout clear+redirect INSIDE `finally` (JD fix #4).
  */
 interface AuthState {
   status: AuthStatus;
   user: UserPrimitive | null;
   accessToken: string | null;
+  /** Single-flight at the store level — one boot refresh per page load. */
   bootRefreshStarted: boolean;
+  register: (input: {
+    email: string;
+    password: string;
+    displayName: string;
+  }) => Promise<void>;
+  login: (input: { email: string; password: string }) => Promise<void>;
+  logout: () => Promise<void>;
+  refreshOnBoot: () => Promise<void>;
   /** http-client calls this on a refresh-401 (cookie expired/revoked). */
   _clear: () => void;
   /** http-client calls this on a successful single-flight refresh. */
@@ -40,6 +61,96 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: null,
   bootRefreshStarted: false,
+
+  async register(input) {
+    set({ status: 'authenticating' });
+    // skipAuthRefresh: register is a PUBLIC endpoint — it must NOT await the
+    // boot gate (R2-2a) and owns its own CONFLICT/401 handling.
+    const data = await httpClient.post<AuthResponse>(
+      endpoints.auth.register,
+      input,
+      { skipAuthRefresh: true },
+    );
+    set({ status: 'authenticated', user: data.user, accessToken: data.accessToken });
+  },
+
+  async login(input) {
+    set({ status: 'authenticating' });
+    // skipAuthRefresh: same rationale as register — public endpoint.
+    const data = await httpClient.post<AuthResponse>(
+      endpoints.auth.login,
+      input,
+      { skipAuthRefresh: true },
+    );
+    set({ status: 'authenticated', user: data.user, accessToken: data.accessToken });
+  },
+
+  // logout: clear + redirect run INSIDE `finally` so they fire even when the
+  // POST throws (network failure, 500, CORS). The session is dead either way.
+  async logout() {
+    try {
+      await httpClient.post(endpoints.auth.logout, {});
+    } catch {
+      /* network failed — session is dead client-side regardless */
+    } finally {
+      get()._clear();
+      if (window.location.pathname !== '/login') window.location.assign('/login');
+    }
+  },
+
+  // Boot refresh owns the cookie for its duration. Captures its promise and
+  // publishes it via setBootRefreshGate BEFORE awaiting so a guarded request
+  // that mounts during the boot refresh awaits THIS promise (not a doomed
+  // 401). The gate is cleared in `finally`. refresh + /me both pass
+  // skipAuthRefresh:true so they do not re-enter the 401 interceptor AND do
+  // not await the gate they populate (R2-2a self-deadlock). Stays
+  // 'authenticating' until /me resolves so there is no authenticated &&
+  // user===null window on the happy path. DISTINGUISHES refresh-failure from
+  // /me-failure (R2-3): a flaky /me after a proven refresh keeps the token.
+  async refreshOnBoot() {
+    if (get().bootRefreshStarted) return; // single-flight at the store level
+    set({ bootRefreshStarted: true, status: 'authenticating' });
+
+    const gate = (async () => {
+      try {
+        const refresh = await httpClient.post<RefreshResponse>(
+          endpoints.auth.refresh,
+          {},
+          { skipAuthRefresh: true }, // boot owns its 401; does not re-enter interceptor
+        );
+        // refresh returns { accessToken } ONLY — set token, stay authenticating.
+        set({ accessToken: refresh.accessToken });
+        try {
+          // /me MUST NOT await the gate the boot is populating (R2-2a).
+          const me = await httpClient.get<UserPrimitive>(endpoints.me, {
+            skipAuthRefresh: true,
+          });
+          set({ status: 'authenticated', user: me });
+        } catch {
+          // INNER catch (R2-3): /me failed AFTER refresh success — the token
+          // was JUST proven valid. A flaky /me MUST NOT logout an authenticated
+          // user. Keep the token, land in authenticated && user===null so
+          // <RequireAuth> keeps splashing (§8), surface a non-fatal toast.
+          set({ status: 'authenticated', user: null });
+          useToast.getState().push({
+            code: 'PROFILE_LOAD_FAILED',
+            message: "Couldn't load your profile — reload to retry.",
+          });
+        }
+      } catch {
+        // OUTER catch: the refresh ITSELF failed (refresh-401 / network) — the
+        // cookie is genuinely gone → unauthenticated.
+        set({ status: 'unauthenticated', user: null, accessToken: null });
+      }
+    })();
+
+    setBootRefreshGate(gate); // publish BEFORE await
+    try {
+      await gate;
+    } finally {
+      setBootRefreshGate(null); // release — later requests don't wait forever
+    }
+  },
 
   _clear: () =>
     set({ status: 'unauthenticated', user: null, accessToken: null }),
