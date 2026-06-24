@@ -1,0 +1,20 @@
+# pnpm v11+ moved several settings here from package.json/.npmrc.
+#
+# `onlyBuiltDependencies` allowlists which deps may run install scripts (CI
+# reproducibility — no surprise native builds). esbuild's postinstall verifies
+# the platform binary; msw's registers a service-worker asset not used under
+# setupServer/jsdom. esbuild also ships its binary via the
+# `@esbuild/<platform>` optional-dependency package, so even if its postinstall
+# is skipped Vite/Vitest still run.
+#
+# `verifyDepsBeforeRun: false` stops `pnpm exec`/`run` from re-running a deps
+# status check that treats not-yet-approved builds as a hard error — that
+# check is an interactive-install guard, not a runtime concern, and would
+# otherwise block the CI gate commands (`pnpm exec tsc|eslint|vitest`).
+#
+# This is a FRONTEND-local single-package workspace file — it does NOT touch
+# the repo root and does NOT make backend/ a workspace member (REQ-FE-001).
+onlyBuiltDependencies:
+  - esbuild
+  - msw
+verifyDepsBeforeRun: false
