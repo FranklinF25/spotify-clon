@@ -12,3 +12,8 @@ coverage
 .DS_Store
 .vscode/
 .idea/
+
+# Test fixture mp3 — overrides the root *.mp3 + audio/ rules so the
+# deterministic sample.mp3 (committed binary, not generated) is tracked.
+!src/test/fixtures/audio/
+!src/test/fixtures/audio/*.mp3
