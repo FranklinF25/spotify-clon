@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from '@/components/organisms/Sidebar/Sidebar';
 import { Topbar } from '@/components/organisms/Topbar/Topbar';
+import { PlayerBar } from '@/components/organisms/PlayerBar/PlayerBar';
 import styles from './AppLayout.module.css';
 
 /**
@@ -10,16 +11,22 @@ import styles from './AppLayout.module.css';
  *  - `<nav>`     Sidebar (Home / Search + disabled Playlists/Library stubs)
  *  - `<header>`  Topbar  (LogoutButton wiring)
  *  - `<main>`    the routed page (`<Outlet/>`)
- *  - `<footer role="region" aria-label="Player">`  the PlayerBarSlot
+ *  - `<footer>`  hosts the global PlayerBar (the PlayerBar organism itself
+ *                owns `role="region" aria-label="Player"` per DESIGN §11.1;
+ *                the footer is just the layout container — the region role
+ *                is asserted in PlayerBar.spec + visible to assistive tech
+ *                because PlayerBar renders inside the footer).
  *
- * The player region hosts `<PlayerBarSlot/>` — an EMPTY placeholder. The real
- * `<PlayerBar/>` (audio sync seam + blob lifecycle) lands in FE-PR4-04;
- * reserving the slot here keeps PR-3 independently coherent (chrome landmarks
- * are verifiable without a no-op PlayerBar stub split across two PRs).
+ * FE-PR4-04 swaps the PR-3 `<PlayerBarSlot/>` placeholder for the real
+ * `<PlayerBar/>` organism (audio sync seam + blob lifecycle, FE-PR4-02).
+ * The runtime single-mount invariant (REQ-FE-008 "PlayerBar is mounted
+ * exactly once in AppLayout") is enforced by architecture.spec.ts Part 2:
+ * it renders this layout, navigates between `/`, `/albums/:id`, `/artists/:id`,
+ * and asserts the `<audio>` element identity is STABLE.
  *
- * React Router keeps this layout element mounted across `/` ↔ `/albums/:id` ↔
- * `/artists/:id` transitions (REQ-FE-008 "PlayerBar mounted exactly once"
- * depends on this in PR-4).
+ * React Router keeps this layout element mounted across `/` ↔ `/albums/:id`
+ * ↔ `/artists/:id` transitions because the entire protected route table is
+ * nested under one AppLayout element.
  */
 export function AppLayout() {
   return (
@@ -31,18 +38,9 @@ export function AppLayout() {
       <main className={styles.content}>
         <Outlet />
       </main>
-      <footer className={styles.player} role="region" aria-label="Player">
-        <PlayerBarSlot />
+      <footer className={styles.player}>
+        <PlayerBar />
       </footer>
     </div>
   );
-}
-
-/**
- * Empty placeholder for the global player. Renders nothing in PR-3; FE-PR4-04
- * swaps this for the real `<PlayerBar/>` organism. Keeping it as a named
- * component makes the swap site explicit + the footer region always present.
- */
-function PlayerBarSlot() {
-  return null;
 }
