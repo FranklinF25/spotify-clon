@@ -1,0 +1,44 @@
+.row {
+  display: grid;
+  grid-template-columns: 2rem 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+}
+
+.row:hover {
+  background-color: var(--color-surface);
+}
+
+.number {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.title {
+  color: var(--color-text);
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.duration {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.play {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--color-text-muted);
+}
+
+.play:hover:not(:disabled) {
+  color: var(--color-accent-hover);
+}
