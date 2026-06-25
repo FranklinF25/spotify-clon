@@ -1,0 +1,31 @@
+.layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-rows: var(--topbar-height) 1fr var(--playerbar-height);
+  grid-template-areas:
+    'sidebar topbar'
+    'sidebar content'
+    'player  player';
+  height: 100vh;
+  background-color: var(--color-bg);
+}
+
+.sidebar {
+  grid-area: sidebar;
+  overflow-y: auto;
+}
+
+.content {
+  grid-area: content;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.player {
+  grid-area: player;
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

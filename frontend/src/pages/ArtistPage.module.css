@@ -1,0 +1,42 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.header {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+}
+
+.image {
+  width: 160px;
+  height: 160px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--color-surface), var(--color-bg));
+  flex-shrink: 0;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.name {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.bio {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.discography {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}

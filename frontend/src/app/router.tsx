@@ -7,7 +7,12 @@ import { RequireAuth } from './RequireAuth';
 import { RedirectIfAuthed } from './RedirectIfAuthed';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
+import { HomePage } from '@/pages/HomePage';
+import { AlbumPage } from '@/pages/AlbumPage';
+import { ArtistPage } from '@/pages/ArtistPage';
+import { SearchPage } from '@/pages/SearchPage';
 import { AuthLayout } from '@/components/templates/AuthLayout/AuthLayout';
+import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
 
 /**
  * Route table (DESIGN §8, REQ-FE-008). Exported so the router spec builds a
@@ -16,10 +21,14 @@ import { AuthLayout } from '@/components/templates/AuthLayout/AuthLayout';
  *
  *  - Public routes (/login, /register) sit under `<RedirectIfAuthed>` +
  *    `<AuthLayout>` (the centered-card public shell).
- *  - Protected routes sit under `<RequireAuth>`. The real `AppLayout` + the
- *    Home/Album/Artist/Search pages land in PR-3; for now a single protected
- *    index placeholder stands in so the guard is demonstrable end-to-end
- *    against MSW.
+ *  - Protected routes sit under `<RequireAuth>` + `<AppLayout>` (Sidebar +
+ *    Topbar + Outlet + PlayerBarSlot). The nested children:
+ *      /            HomePage (featured albums — REQ-FE-009)
+ *      /albums/:id  AlbumPage (tracks + queue seeding — REQ-FE-009)
+ *      /artists/:id ArtistPage (embedded albums — REQ-FE-009)
+ *      /search      SearchPage (PLACEHOLDER — real impl lands FE-PR4-06)
+ *    React Router keeps AppLayout mounted across these transitions
+ *    (REQ-FE-008 "PlayerBar mounted exactly once" depends on this in PR-4).
  *  - The `*` catch-all is OUTSIDE both guard parents so unknown routes
  *    redirect to "/" regardless of auth state.
  *
@@ -37,11 +46,20 @@ export const routes: RouteObject[] = [
   },
   {
     element: <RequireAuth />,
-    // PR-3 swaps this placeholder for <AppLayout/> + Home/Album/Artist/Search.
     children: [
       {
-        index: true,
-        element: <div data-testid="protected-home">Protected home</div>,
+        element: <AppLayout />,
+        children: [
+          {
+            path: '/',
+            children: [
+              { index: true, element: <HomePage /> },
+              { path: 'albums/:id', element: <AlbumPage /> },
+              { path: 'artists/:id', element: <ArtistPage /> },
+              { path: 'search', element: <SearchPage /> },
+            ],
+          },
+        ],
       },
     ],
   },

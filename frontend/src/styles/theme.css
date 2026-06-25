@@ -30,6 +30,18 @@
   --radius-lg: 12px;
   --radius-full: 9999px;
 
+  /* Layout — AppLayout chrome (FE-PR3-10). Fixed-rhythm landmarks so the
+   * Sidebar/Topbar/PlayerBar regions stay stable across page transitions. */
+  --sidebar-width: 232px;
+  --topbar-height: 64px;
+  --playerbar-height: 90px;
+
+  /* Elevation — covers sit on AlbumCards, the Sidebar lifts above content. */
+  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --z-sidebar: 20;
+  --z-topbar: 30;
+  --z-player: 40;
+
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
     Arial, sans-serif;
   color: var(--color-text);
