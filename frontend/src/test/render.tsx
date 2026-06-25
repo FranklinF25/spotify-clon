@@ -3,9 +3,17 @@ import { render as rtlRender } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+/**
+ * A MemoryRouter initial entry — either a path string or a partial location
+ * (so a test can deep-link WITH router state, e.g. the RequireAuth `from`
+ * redirect). Mirrors `history`'s `InitialEntry` without importing the
+ * transitive `history` dep.
+ */
+type InitialEntry = string | { pathname: string; state?: unknown };
+
 interface RenderOptions {
-  /** MemoryRouter initial entries — deep-link a route for the test. */
-  routeInitialEntries?: string[];
+  /** MemoryRouter initial entries — deep-link a route (incl. state) for the test. */
+  routeInitialEntries?: InitialEntry[];
 }
 
 /**
