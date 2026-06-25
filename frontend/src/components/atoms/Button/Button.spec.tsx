@@ -42,4 +42,25 @@ describe('Button atom', () => {
       'submit',
     );
   });
+
+  it('forwards aria-label so the accessible name is descriptive', () => {
+    render(
+      <Button aria-label="Play album">
+        <span aria-hidden="true">▶</span>
+      </Button>,
+    );
+    expect(
+      screen.getByRole('button', { name: /play album/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('supports the ghost variant (transparent — used by play controls)', () => {
+    // The ghost variant is purely visual; the contract is that it renders
+    // without error for AlbumCard/TrackRow play buttons. CSS-class coupling
+    // is explicitly out of scope (strict-tdd: no class-name assertions).
+    render(<Button variant="ghost">Play</Button>);
+    expect(
+      screen.getByRole('button', { name: 'Play' }),
+    ).toBeInTheDocument();
+  });
 });
