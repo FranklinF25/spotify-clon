@@ -1,0 +1,13 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  height: var(--topbar-height);
+  padding: 0 var(--space-5);
+  background-color: var(--color-bg-elevated);
+}
+
+.spacer {
+  flex: 1;
+}
