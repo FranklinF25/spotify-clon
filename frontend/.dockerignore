@@ -1,0 +1,26 @@
+# Build-context hygiene for the frontend image (DOCKER-PR1-01).
+#
+# Keeps the context lean and prevents stale dist/ + node_modules from leaking
+# into the builder stage. Load-bearing paths are NOT excluded:
+#   - src/                    (vite build → dist/)
+#   - package.json, pnpm-lock.yaml, pnpm-workspace.yaml, .npmrc
+#     (W1 + R2-C4 — .npmrc carries verify-deps-before-run=false; the workspace
+#      file carries onlyBuiltDependencies:[esbuild,msw])
+#   - tsconfig.json, vite.config.ts, index.html
+
+node_modules
+dist
+coverage
+
+# Env files never belong in an image.
+.env
+.env.*
+
+# Docs + VCS noise.
+*.md
+.git
+.gitignore
+
+# Local editor / OS cruft.
+.DS_Store
+*.log

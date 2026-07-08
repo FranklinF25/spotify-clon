@@ -1,0 +1,36 @@
+# Build-context hygiene for the backend image (DOCKER-PR1-01, REQ-DOCKER-009).
+#
+# Keeps the context lean AND prevents test/ artifacts from leaking into the
+# builder/runtime images. The REQ-009 "infra-only diff" guard is not polluted
+# by copying test/ or node_modules into layers.
+#
+# Load-bearing paths are NOT excluded (must reach the build):
+#   - prisma/            (postinstall prisma generate reads schema.prisma;
+#                         migrate service runs `prisma migrate deploy`)
+#   - scripts/           (C1 — seed service runs scripts/seed-with-guard.sh)
+#   - src/               (nest build → dist/)
+#   - package.json, pnpm-lock.yaml, pnpm-workspace.yaml, tsconfig*.json,
+#     nest-cli.json
+
+node_modules
+dist
+coverage
+
+# Env files never belong in an image.
+.env
+.env.*
+
+# Test artifacts are host-side concerns; excluding them shrinks the context and
+# guarantees test/ code can never ship inside a serving image.
+test/fixtures
+test/e2e
+test/docker
+
+# Docs + VCS noise.
+*.md
+.git
+.gitignore
+
+# Local editor / OS cruft.
+.DS_Store
+*.log
