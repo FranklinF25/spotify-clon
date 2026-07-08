@@ -1,4 +1,4 @@
-import { Injectable, type LoggerService } from '@nestjs/common';
+import { Injectable, Optional, type LoggerService } from '@nestjs/common';
 import pino, { type Logger, type LoggerOptions } from 'pino';
 
 import { getCurrentRequestId } from './request-context';
@@ -33,7 +33,15 @@ export function createBaseLogger(level: string = 'info', options: LoggerOptions 
 export class AppLogger implements LoggerService {
   private readonly logger: Logger;
 
-  constructor(logger?: Logger, level: string = 'info') {
+  // The @Optional() annotations are required so Nest DI does not fail on boot:
+  // `Logger` is a `type`-only (erased) import, so `design:paramtypes` emits
+  // `Object` for the first param and the container cannot resolve it —
+  // `node dist/main.js` crashed with "Nest can't resolve dependencies of the
+  // AppLogger (?, String)". Behavior is unchanged: the params were already
+  // optional/defaulted; the logger still builds its own pino instance via
+  // `createBaseLogger(level)` when nothing is injected. See REQ-DOCKER-009
+  // amendment 2026-07-08 (documented exception to the infra-only diff guard).
+  constructor(@Optional() logger?: Logger, @Optional() level: string = 'info') {
     this.logger = logger ?? createBaseLogger(level);
   }
 

@@ -31,7 +31,12 @@ AUDIO_DIR="$(pwd)/audio"
 AUDIO_TRACK_DIR="$AUDIO_DIR/$FIRST_ALBUM_ID"
 AUDIO_TRACK_FILE="$AUDIO_TRACK_DIR/$FIRST_TRACK_ID.mp3"
 
-COMPOSE="docker compose"
+# COMPOSE is an ARRAY (not a quoted string) so each call site expands to two
+# distinct argv words ("docker" "compose"). A quoted scalar like
+# COMPOSE="docker compose" used as "$COMPOSE" would collapse to a single
+# "docker compose" token and bash would look for a binary literally named
+# "docker compose" → exit 127.
+COMPOSE=(docker compose)
 DB_C="spotify-clon-db"
 BACKEND_C="spotify-clon-backend"
 FRONTEND_C="spotify-clon-frontend"
@@ -88,7 +93,7 @@ wait_healthy() {
   local container="$1" budget="$2" deadline=$((SECONDS + $2))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local st
-    st="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || echo none)"
+    st="$(docker inspect --type container --format '{{.State.Health.Status}}' "$container" 2>/dev/null | tr -d '[:space:]' || echo none)"
     if [ "$st" = "healthy" ]; then return 0; fi
     sleep 2
   done
@@ -106,7 +111,7 @@ count_rows() {
 
 cleanup() {
   local rc=$?
-  "$COMPOSE" down -v >/dev/null 2>&1 || true
+  "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
   rm -rf "$AUDIO_TRACK_DIR" 2>/dev/null || true
   rm -f /tmp/smoke_body.$$ /tmp/smoke_poison.yml.$$ 2>/dev/null || true
   exit "$rc"
@@ -120,18 +125,18 @@ trap cleanup EXIT INT TERM
 # fast; it exercises exactly the dependency gate (no DNS/DB flakiness).
 # =============================================================================
 say "=== Phase A: REQ-DOCKER-003 poisoned-migrate gate ==="
-"$COMPOSE" down -v >/dev/null 2>&1 || true
+"${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
 cat > /tmp/smoke_poison.yml.$$ <<'YAML'
 services:
   migrate:
     command: ["sh", "-c", "echo '[migrate] forced failure (poisoned smoke run)' >&2; exit 1"]
 YAML
 # Bring up db + a poisoned migrate; backend/seed depend on migrate succeeding.
-"$COMPOSE" -f docker-compose.yml -f /tmp/smoke_poison.yml.$$ up -d db migrate >/dev/null 2>&1 || true
+"${COMPOSE[@]}" -f docker-compose.yml -f /tmp/smoke_poison.yml.$$ up -d db migrate >/dev/null 2>&1 || true
 # Give migrate time to run and fail (does NOT reach healthy).
 sleep 12
 # backend + seed must NOT exist/running because migrate did not complete successfully.
-BACKEND_STATE="$(docker inspect --format '{{.State.Status}}' "$BACKEND_C" 2>/dev/null || echo absent)"
+BACKEND_STATE="$(docker inspect --type container --format '{{.State.Status}}' "$BACKEND_C" 2>/dev/null | tr -d '[:space:]' || echo absent)"
 if [ "$BACKEND_STATE" = "absent" ] || [ "$BACKEND_STATE" = "created" ] || [ "$BACKEND_STATE" = "" ]; then
   pass "REQ-003: failed migrate blocks backend (state=$BACKEND_STATE)"
 else
@@ -139,7 +144,7 @@ else
 fi
 SEED_RAN_ROWS="$(count_rows artists 2>/dev/null || echo 0)"
 assert_eq "$SEED_RAN_ROWS" "0" "REQ-003: failed migrate blocks seed (artists=0)"
-"$COMPOSE" -f docker-compose.yml -f /tmp/smoke_poison.yml.$$ down -v >/dev/null 2>&1 || true
+"${COMPOSE[@]}" -f docker-compose.yml -f /tmp/smoke_poison.yml.$$ down -v >/dev/null 2>&1 || true
 rm -f /tmp/smoke_poison.yml.$$
 
 # =============================================================================
@@ -155,7 +160,7 @@ cp "$FIXTURE_SRC" "$AUDIO_TRACK_FILE"
 
 # REQ-001: single command, no --profile. `up -d` builds + starts all 5 services.
 UP_START="$SECONDS"
-"$COMPOSE" up -d >/dev/null 2>&1
+"${COMPOSE[@]}" up -d >/dev/null 2>&1
 UP_RETURN="$SECONDS"
 say "compose up -d returned (build excluded from the cold-start window per W4)."
 
@@ -170,7 +175,7 @@ done
 
 # REQ-001 scenario 1: default up lists db/backend/frontend as healthy.
 for c in "$DB_C" "$BACKEND_C" "$FRONTEND_C"; do
-  st="$(docker inspect --format '{{.State.Health.Status}}' "$c" 2>/dev/null || echo none)"
+  st="$(docker inspect --type container --format '{{.State.Health.Status}}' "$c" 2>/dev/null | tr -d '[:space:]' || echo none)"
   assert_eq "$st" "healthy" "REQ-001: $c reports healthy"
 done
 
@@ -180,11 +185,11 @@ assert_eq "$code" "200" "REQ-001/008: GET https://localhost/health → 200"
 
 # REQ-003 scenario 1: migrate completed successfully (exit 0) — by now backend
 # is healthy, which is only possible if migrate exited 0 (dependency gate).
-MIG_RC="$(docker inspect --format '{{.State.ExitCode}}' "$MIGRATE_C" 2>/dev/null || echo unknown)"
+MIG_RC="$(docker inspect --type container --format '{{.State.ExitCode}}' "$MIGRATE_C" 2>/dev/null | tr -d '[:space:]' || echo unknown)"
 assert_eq "$MIG_RC" "0" "REQ-003/004: migrate exited 0 (gated backend+seed)"
 
 # REQ-004 scenario 1: cold start applied migrations.
-MIG_LOGS="$("$COMPOSE" logs migrate 2>/dev/null || true)"
+MIG_LOGS="$("${COMPOSE[@]}" logs migrate 2>/dev/null || true)"
 assert_contains "$MIG_LOGS" "applied" "REQ-004: migrate logs 'applied' on cold start"
 
 # REQ-005 scenario 1: cold start seeded (0 → >0).
@@ -197,7 +202,7 @@ else
 fi
 
 # REQ-007 scenario 3: backend boots clean — no superRefine fail-fast.
-BACKEND_LOGS="$("$COMPOSE" logs backend 2>/dev/null || true)"
+BACKEND_LOGS="$("${COMPOSE[@]}" logs backend 2>/dev/null || true)"
 assert_not_contains "$BACKEND_LOGS" "Invalid environment configuration" \
   "REQ-007: backend boots clean (no superRefine fail-fast)"
 
@@ -288,8 +293,16 @@ refresh_out="$(curl -k -s -i -b "$JAR" -c "$JAR" -X POST "$BASE_URL/api/v1/auth/
 refresh_code="$(printf '%s' "$refresh_out" | awk 'NR==1{print $2}')"
 assert_eq "$refresh_code" "200" "REQ-007: POST /api/v1/auth/refresh → 200"
 NEW_TOKEN="$(printf '%s' "$refresh_out" | sed -n 's/.*"accessToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-if [ -n "$NEW_TOKEN" ] && [ "$NEW_TOKEN" != "$ACCESS_TOKEN" ]; then
-  pass "REQ-007/009: refresh returned a new accessToken (rotated)"
+# Rotation signal: compare the REFRESH-token cookies (single-session rotation
+# issues a new refresh token with a fresh jti each call). We deliberately do NOT
+# compare the access tokens: short-lived access JWTs are deterministic HMACs of
+# (sub, iat, exp), so a login + refresh issued in the same wall-clock second
+# produce a byte-identical access token even though rotation succeeded. The
+# refresh-cookie jti always rotates, so it is the reliable contract signal.
+LOGIN_RT="$(printf '%s' "$login_out" | sed -n 's/.*refreshToken=\([^;]*\).*/\1/p' | head -n1)"
+REFRESH_RT="$(printf '%s' "$refresh_out" | sed -n 's/.*refreshToken=\([^;]*\).*/\1/p' | head -n1)"
+if [ -n "$NEW_TOKEN" ] && [ -n "$REFRESH_RT" ] && [ "$REFRESH_RT" != "$LOGIN_RT" ]; then
+  pass "REQ-007/009: refresh rotated the refresh cookie + returned an accessToken"
 else
   fail "REQ-007/009: refresh did not return a new accessToken"
 fi
@@ -340,7 +353,11 @@ code="$(http "$BASE_URL/health")"
 assert_eq "$code" "200" "REQ-011: backend serves /health 200 in-stack"
 
 # Frontend: no node process; index served over :443.
-FE_PIDS="$(docker exec "$FRONTEND_C" sh -c 'ps -o comm= -A 2>/dev/null | grep -c "^node$" || echo 0' 2>/dev/null || echo 0)"
+# `grep -c` prints the count AND exits 1 when the count is 0, so a trailing
+# `|| echo 0` would double-print ("0\n0"). Use `|| true` inside the pipe so the
+# single grep count line is the only output; the OUTER `|| echo 0` still covers
+# a docker-exec failure.
+FE_PIDS="$(docker exec "$FRONTEND_C" sh -c 'ps -o comm= -A 2>/dev/null | grep -c "^node$" || true' 2>/dev/null | tr -d '[:space:]' || echo 0)"
 assert_eq "$FE_PIDS" "0" "REQ-011: no node process in frontend runtime"
 code="$(http "$BASE_URL/")"
 assert_eq "$code" "200" "REQ-011: frontend serves index over TLS"
@@ -356,14 +373,14 @@ BASE_TRACKS="$TRACKS_AFTER"
 
 # REQ-004 scenario 2: re-run migrate is a no-op that exits 0.
 # REQ-005 scenario 2: warm restart (down WITHOUT -v) skips seeding, counts unchanged.
-"$COMPOSE" down >/dev/null 2>&1
-"$COMPOSE" up -d >/dev/null 2>&1
+"${COMPOSE[@]}" down >/dev/null 2>&1
+"${COMPOSE[@]}" up -d >/dev/null 2>&1
 for c in "$DB_C" "$BACKEND_C" "$FRONTEND_C"; do
   wait_healthy "$c" 120 || fail "REQ-005: $c not healthy on warm restart"
 done
-MIG_LOGS_2="$("$COMPOSE" logs migrate 2>/dev/null || true)"
+MIG_LOGS_2="$("${COMPOSE[@]}" logs migrate 2>/dev/null || true)"
 assert_contains "$MIG_LOGS_2" "already applied\|No pending" "REQ-004: re-run migrate is a no-op"
-SEED_LOGS_2="$("$COMPOSE" logs seed 2>/dev/null || true)"
+SEED_LOGS_2="$("${COMPOSE[@]}" logs seed 2>/dev/null || true)"
 assert_contains "$SEED_LOGS_2" "skipping" "REQ-005: warm restart seed logs 'skipping'"
 WARM_ARTISTS="$(count_rows artists)"
 WARM_TRACKS="$(count_rows tracks)"
@@ -371,8 +388,8 @@ assert_eq "$WARM_ARTISTS" "$BASE_ARTISTS" "REQ-005/010: warm restart — artists
 assert_eq "$WARM_TRACKS" "$BASE_TRACKS" "REQ-005/010: warm restart — tracks unchanged"
 
 # REQ-010 scenario 2 + REQ-005 scenario 3: down -v destroys → next up re-seeds.
-"$COMPOSE" down -v >/dev/null 2>&1
-"$COMPOSE" up -d >/dev/null 2>&1
+"${COMPOSE[@]}" down -v >/dev/null 2>&1
+"${COMPOSE[@]}" up -d >/dev/null 2>&1
 for c in "$DB_C" "$BACKEND_C" "$FRONTEND_C"; do
   wait_healthy "$c" 120 || fail "REQ-010: $c not healthy after down -v + up"
 done
@@ -387,10 +404,17 @@ fi
 assert_eq "$RESET_ARTISTS" "$BASE_ARTISTS" "REQ-010: re-seed artists == baseline (deterministic)"
 
 # =============================================================================
-# Phase D — REQ-009 infra-only diff guard (S2 widened)
+# Phase D — REQ-009 infra-only diff guard (S2 widened + Amendment 2026-07-08)
+# ONE documented exception: backend/src/logger.ts (the @Optional() AppLogger
+# DI fix — spec REQ-009 amendment 2026-07-08). The diff under the locked paths
+# MUST be at most that single file; anything else fails the regression guard.
 # =============================================================================
-say "=== Phase D: REQ-009 infra-only diff guard ==="
-DIFF_OUT="$(git diff --stat main -- \
+say "=== Phase D: REQ-009 infra-only diff guard (logger.ts exception) ==="
+# Use --name-only (one path per line) instead of --stat: the --stat summary
+# line ("N files changed...") contains no filename and would falsely survive a
+# path filter. The ONLY permitted path is backend/src/logger.ts (the
+# @Optional() AppLogger DI fix — REQ-009 amendment 2026-07-08).
+DIFF_NAMES="$(git diff --name-only main -- \
   backend/src \
   frontend/src \
   prisma/schema.prisma \
@@ -398,11 +422,17 @@ DIFF_OUT="$(git diff --stat main -- \
   prisma/seed.ts \
   backend/package.json \
   frontend/package.json 2>/dev/null || true)"
-if [ -z "$DIFF_OUT" ]; then
-  pass "REQ-009: no application-source diff against main (infra-only)"
+# Remove the one permitted path (exact, whole-line); anything left is a violation.
+VIOLATIONS="$(printf '%s\n' "$DIFF_NAMES" | grep -vxF 'backend/src/logger.ts' || true)"
+if [ -z "$VIOLATIONS" ]; then
+  if [ -n "$DIFF_NAMES" ]; then
+    pass "REQ-009: only backend/src/logger.ts modified (documented @Optional() exception)"
+  else
+    pass "REQ-009: no application-source diff against main (infra-only)"
+  fi
 else
-  fail "REQ-009: application source modified:
-$DIFF_OUT"
+  fail "REQ-009: unexpected application-source diff (non-logger.ts):
+$VIOLATIONS"
 fi
 
 # =============================================================================

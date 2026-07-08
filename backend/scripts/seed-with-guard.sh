@@ -15,7 +15,12 @@
 #   2 — count query failed (schema not migrated / DB unreachable) — FAILS LOUDLY
 #       (S1): a failure MUST NOT collapse into "empty" and fall through to the
 #       seed, because seeding into a missing schema would crash mid-way.
-set -euo pipefail
+# `set -eu` (NOT `-o pipefail`): this script runs under `/bin/sh` (dash in the
+# node image), which does NOT support `pipefail`. The script has no pipelines
+# (the `node -e` count + `exec ts-node` are single commands), so `pipefail` was
+# both unsupported here and unnecessary. `-u` catches unset vars; `-e` fails
+# fast. See REQ-DOCKER-005 (S1 fails-loudly exit 2 is handled in the `case`).
+set -eu
 
 # Count step — the node script exits: 0 = already seeded, 1 = empty, 2 = error
 # (count query threw: schema not migrated, DB unreachable). stderr is left
