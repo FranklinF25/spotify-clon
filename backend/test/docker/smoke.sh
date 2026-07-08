@@ -95,10 +95,13 @@ wait_healthy() {
   return 1
 }
 
-# count_rows <table> — psql count via the db container.
+# count_rows <table> — psql count via the db container. Returns "0" when the
+# table is missing (schema not migrated) or the query errors, so the
+# poisoned-migrate phase can assert "0 rows" cleanly.
 count_rows() {
-  local table="$1"
-  docker exec "$DB_C" psql -U postgres -d spotify_clone -tAc "SELECT count(*) FROM \"$table\";" 2>/dev/null | tr -d '[:space:]'
+  local table="$1" out
+  out="$(docker exec "$DB_C" psql -U postgres -d spotify_clone -tAc "SELECT count(*) FROM \"$table\";" 2>/dev/null | tr -d '[:space:]')"
+  if [ -z "$out" ]; then echo 0; else echo "$out"; fi
 }
 
 cleanup() {
@@ -241,11 +244,11 @@ assert_not_contains "$hsts_headers" "Strict-Transport-Security" "REQ-002: no HST
 # REQ-008 — proxy path preservation (no trailing slash)
 # -----------------------------------------------------------------------------
 say "=== Phase B: REQ-008 proxy path preservation ==="
-# /api/v1 path reaches the backend unchanged. An unauthenticated request to a
-# guarded route returns 401 (NOT 404) — proving the path reached the backend
-# intact. A trailing slash would rewrite to /v1/... → 404.
-code="$(http "$BASE_URL/api/v1/auth/login")"
-assert_eq "$code" "401" "REQ-008: /api/v1/auth/login reaches backend (401, path intact — not 404)"
+# /api/v1 path reaches the backend unchanged. A GET to the guarded /me route
+# WITHOUT a token returns 401 (JwtAuthGuard) — proving the path reached the
+# backend intact. A trailing slash would rewrite /api/v1/me → /v1/me → 404.
+code="$(http "$BASE_URL/api/v1/me")"
+assert_eq "$code" "401" "REQ-008: /api/v1/me reaches backend (401, path intact — not 404)"
 code="$(http "$BASE_URL/health")"
 assert_eq "$code" "200" "REQ-008: /health proxied to backend"
 
