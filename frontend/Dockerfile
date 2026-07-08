@@ -49,7 +49,11 @@ FROM nginx:1.27-alpine AS runtime
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY --from=builder /certs/localhost.crt /etc/nginx/certs/localhost.crt
-COPY --from=builder /certs/localhost.key /etc/nginx/certs/localhost.key
+# Private key locked to 0400 (S1) — root-readable only; nginx master runs as
+# root and drops privileges in workers. The public cert stays default (0644).
+# --chmod needs BuildKit, enabled by the `# syntax=docker/dockerfile:1` directive
+# at the top of this file (default in modern Docker).
+COPY --chmod=0400 --from=builder /certs/localhost.key /etc/nginx/certs/localhost.key
 EXPOSE 80 443
 # Healthcheck hits :443 directly over TLS with --no-check-certificate (bypasses
 # the self-signed trust step) and pins the IPv4 loopback 127.0.0.1 (R2-C1 — NOT

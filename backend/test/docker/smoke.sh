@@ -90,7 +90,7 @@ http() { curl -k -s -o /tmp/smoke_body.$$ -w '%{http_code}' "$@"; }
 
 # wait_healthy <container> <seconds> — poll the healthcheck status.
 wait_healthy() {
-  local container="$1" budget="$2" deadline=$((SECONDS + $2))
+  local container="$1" deadline=$((SECONDS + $2))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local st
     st="$(docker inspect --type container --format '{{.State.Health.Status}}' "$container" 2>/dev/null | tr -d '[:space:]' || echo none)"
@@ -107,6 +107,24 @@ count_rows() {
   local table="$1" out
   out="$(docker exec "$DB_C" psql -U postgres -d spotify_clone -tAc "SELECT count(*) FROM \"$table\";" 2>/dev/null | tr -d '[:space:]')"
   if [ -z "$out" ]; then echo 0; else echo "$out"; fi
+}
+
+# wait_seed_done <seconds> — poll the seed container until it has truly FINISHED
+# with exit 0, bounded by <seconds>. MUST gate every count_rows read (W4):
+# backend + seed start in parallel after migrate, so reading counts the moment
+# the three healthchecks turn green can race a seed still mid-run (cold ts-node
+# start + 40-row transaction) → spurious "did not seed". ExitCode alone is NOT a
+# safe signal: a not-yet-started (`created`) or `running` container reports
+# ExitCode 0, so we additionally require Status == `exited`.
+wait_seed_done() {
+  local deadline=$((SECONDS + $1)) st rc
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    st="$(docker inspect --type container --format '{{.State.Status}}' "$SEED_C" 2>/dev/null | tr -d '[:space:]' || echo unknown)"
+    rc="$(docker inspect --type container --format '{{.State.ExitCode}}' "$SEED_C" 2>/dev/null | tr -d '[:space:]' || echo unknown)"
+    if [ "$st" = "exited" ] && [ "$rc" = "0" ]; then return 0; fi
+    sleep 2
+  done
+  return 1
 }
 
 cleanup() {
@@ -131,19 +149,50 @@ services:
   migrate:
     command: ["sh", "-c", "echo '[migrate] forced failure (poisoned smoke run)' >&2; exit 1"]
 YAML
-# Bring up db + a poisoned migrate; backend/seed depend on migrate succeeding.
-"${COMPOSE[@]}" -f docker-compose.yml -f /tmp/smoke_poison.yml.$$ up -d db migrate >/dev/null 2>&1 || true
-# Give migrate time to run and fail (does NOT reach healthy).
-sleep 12
-# backend + seed must NOT exist/running because migrate did not complete successfully.
+# W1 fix: bring up the FULL stack under the poisoned override, NOT just
+# `db migrate`. The old `up -d db migrate` only requested two services —
+# backend/seed are downstream and were NEVER requested, so they were trivially
+# "absent" and the assertions passed regardless of whether the DAG gate
+# (depends_on migrate: service_completed_successfully) actually gates anything.
+# The full stack CREATES backend+seed; the gate then HOLDS them in `created`
+# (requested but never started) because the poisoned migrate exited 1. A BROKEN
+# gate (no depends_on) would let backend reach `running` — that is exactly the
+# failure this assertion must catch.
+"${COMPOSE[@]}" -f docker-compose.yml -f /tmp/smoke_poison.yml.$$ up -d >/dev/null 2>&1 || true
+# Give migrate time to run and fail; db time to come up. backend+seed are held
+# in `created` waiting on the (now-unsatisfiable) migrate-success condition.
+sleep 15
+# backend was REQUESTED (exists) but MUST NOT be `running` — migrate failed, so
+# the service_completed_successfully gate is unsatisfiable. `created` is the
+# working-gate signature; `running` would mean a BROKEN gate (the vacuous-pass
+# case); `absent` would mean the full stack was not requested (test setup bug).
 BACKEND_STATE="$(docker inspect --type container --format '{{.State.Status}}' "$BACKEND_C" 2>/dev/null | tr -d '[:space:]' || echo absent)"
-if [ "$BACKEND_STATE" = "absent" ] || [ "$BACKEND_STATE" = "created" ] || [ "$BACKEND_STATE" = "" ]; then
-  pass "REQ-003: failed migrate blocks backend (state=$BACKEND_STATE)"
+case "$BACKEND_STATE" in
+  created|paused)
+    pass "REQ-003: failed migrate holds backend in '$BACKEND_STATE' (DAG gate holds — not running)"
+    ;;
+  running)
+    fail "REQ-003: backend reached 'running' despite failed migrate — DAG gate BROKEN (state=$BACKEND_STATE)"
+    ;;
+  absent|"")
+    fail "REQ-003: backend container absent — full stack was not requested under the poison (state='$BACKEND_STATE')"
+    ;;
+  *)
+    fail "REQ-003: backend state='$BACKEND_STATE' unexpected (expected created, NOT running/absent)"
+    ;;
+esac
+# seed is gated by the same migrate condition → also held in `created`, never ran.
+SEED_STATE="$(docker inspect --type container --format '{{.State.Status}}' "$SEED_C" 2>/dev/null | tr -d '[:space:]' || echo absent)"
+if [ "$SEED_STATE" = "created" ] || [ "$SEED_STATE" = "paused" ]; then
+  pass "REQ-003: failed migrate holds seed in '$SEED_STATE' (DAG gate holds — seed never ran)"
 else
-  fail "REQ-003: backend started despite failed migrate (state=$BACKEND_STATE)"
+  fail "REQ-003: seed state='$SEED_STATE' — expected created (gated by failed migrate), not running"
 fi
+# artists=0 is now a MEANINGFUL consequence (seed never executed because the gate
+# held it), NOT a trivial one (previously seed was never even requested). The
+# schema is also unmigrated (migrate failed), so count_rows safely returns 0.
 SEED_RAN_ROWS="$(count_rows artists 2>/dev/null || echo 0)"
-assert_eq "$SEED_RAN_ROWS" "0" "REQ-003: failed migrate blocks seed (artists=0)"
+assert_eq "$SEED_RAN_ROWS" "0" "REQ-003: failed migrate blocks seed (artists=0, seed never ran)"
 "${COMPOSE[@]}" -f docker-compose.yml -f /tmp/smoke_poison.yml.$$ down -v >/dev/null 2>&1 || true
 rm -f /tmp/smoke_poison.yml.$$
 
@@ -165,12 +214,26 @@ UP_RETURN="$SECONDS"
 say "compose up -d returned (build excluded from the cold-start window per W4)."
 
 # REQ-001 scenario 2: cold start reaches steady state ≤120s from `up` RETURN.
+# W2 fix: a SHARED aggregate deadline, NOT a per-service 120s budget. The old
+# `wait_healthy "$c" 120` loop gave each service its own 120s window counted from
+# when the PREVIOUS service turned healthy, so the aggregate could reach ~360s
+# while every per-service check "passed" (and UP_RETURN was captured but never
+# used). UP_RETURN now anchors a single 120s deadline; the poll fails the moment
+# ANY service is still not healthy past it.
+COLD_DEADLINE=$((UP_RETURN + 120))
+while [ "$SECONDS" -lt "$COLD_DEADLINE" ]; do
+  all_healthy=yes
+  for c in "$DB_C" "$BACKEND_C" "$FRONTEND_C"; do
+    st="$(docker inspect --type container --format '{{.State.Health.Status}}' "$c" 2>/dev/null | tr -d '[:space:]' || echo none)"
+    [ "$st" = "healthy" ] || all_healthy=no
+  done
+  [ "$all_healthy" = "yes" ] && break
+  sleep 2
+done
+COLD_ELAPSED=$((SECONDS - UP_RETURN))
 for c in "$DB_C" "$BACKEND_C" "$FRONTEND_C"; do
-  if wait_healthy "$c" 120; then
-    pass "REQ-001: $c healthy within 120s"
-  else
-    fail "REQ-001: $c NOT healthy within 120s"
-  fi
+  st="$(docker inspect --type container --format '{{.State.Health.Status}}' "$c" 2>/dev/null | tr -d '[:space:]' || echo none)"
+  assert_eq "$st" "healthy" "REQ-001: $c healthy (cold start ${COLD_ELAPSED}s ≤ 120s aggregate from up RETURN)"
 done
 
 # REQ-001 scenario 1: default up lists db/backend/frontend as healthy.
@@ -193,6 +256,14 @@ MIG_LOGS="$("${COMPOSE[@]}" logs migrate 2>/dev/null || true)"
 assert_contains "$MIG_LOGS" "applied" "REQ-004: migrate logs 'applied' on cold start"
 
 # REQ-005 scenario 1: cold start seeded (0 → >0).
+# W4: gate the count read on the seed container actually finishing — seed starts
+# in parallel with backend after migrate, so reading counts the instant the
+# healthchecks turn green can race a seed still mid-run → spurious "did not seed".
+if wait_seed_done 60; then
+  pass "REQ-005: seed container exited 0 before count read (race window closed)"
+else
+  fail "REQ-005: seed did not reach exited/0 within 60s — race window unbounded"
+fi
 ARTISTS_AFTER="$(count_rows artists)"
 TRACKS_AFTER="$(count_rows tracks)"
 if [ "$ARTISTS_AFTER" -gt 0 ] && [ "$TRACKS_AFTER" -gt 0 ]; then
@@ -230,10 +301,17 @@ assert_contains "$cert_info" "DNS:localhost" "REQ-002: cert SAN contains DNS:loc
 assert_contains "$cert_info" "127.0.0.1" "REQ-002: cert SAN contains IP:127.0.0.1"
 
 # Scenario 4: TLS 1.1 refused, 1.2 negotiated.
-if echo | openssl s_client -connect localhost:443 -tls1_1 >/dev/null 2>&1; then
+# W3 fix: on openssl ≥3.x (this host is 3.5.x) `-tls1_1` fails CLIENT-SIDE at
+# security level 1 ("no protocols available") before ever sending a ClientHello,
+# so nginx is never probed and the refusal was vacuously "proven". Lowering the
+# cipher security level forces the client to actually emit a TLS 1.1 ClientHello,
+# so the handshake outcome now reflects nginx's `ssl_protocols TLSv1.2 TLSv1.3`
+# refusal (nginx.conf:22) — the thing under test. If nginx were misconfigured to
+# permit 1.1, this handshake would now SUCCEED and the assertion would FAIL.
+if echo | openssl s_client -connect localhost:443 -tls1_1 -cipher 'DEFAULT:@SECLEVEL=0' >/dev/null 2>&1; then
   fail "REQ-002: TLS 1.1 was accepted (must be refused)"
 else
-  pass "REQ-002: TLS 1.1 refused"
+  pass "REQ-002: TLS 1.1 refused (client forced SECLEVEL=0 → nginx refusal is what's tested)"
 fi
 if echo | openssl s_client -connect localhost:443 -tls1_2 >/dev/null 2>&1; then
   pass "REQ-002: TLS 1.2 negotiated"
@@ -285,10 +363,10 @@ assert_contains "$set_cookie_hdr" "Secure" "REQ-007: Set-Cookie carries Secure"
 assert_contains "$set_cookie_hdr" "SameSite=Lax" "REQ-007: Set-Cookie carries SameSite=Lax"
 assert_contains "$set_cookie_hdr" "Path=/api/v1/auth" "REQ-007: Set-Cookie carries Path=/api/v1/auth"
 
-# Grab the access token from the login body for the Bearer-authed scenarios.
-ACCESS_TOKEN="$(printf '%s' "$login_out" | sed -n 's/.*"accessToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-
 # Refresh round-trips through nginx (cookie auto-attached, same-origin).
+# Note: the Bearer-authed scenarios below use $NEW_TOKEN (from THIS refresh),
+# NOT the login accessToken — so the login accessToken is deliberately not
+# captured here (it was a dead variable; removed in S2 cleanup).
 refresh_out="$(curl -k -s -i -b "$JAR" -c "$JAR" -X POST "$BASE_URL/api/v1/auth/refresh")"
 refresh_code="$(printf '%s' "$refresh_out" | awk 'NR==1{print $2}')"
 assert_eq "$refresh_code" "200" "REQ-007: POST /api/v1/auth/refresh → 200"
@@ -382,6 +460,8 @@ MIG_LOGS_2="$("${COMPOSE[@]}" logs migrate 2>/dev/null || true)"
 assert_contains "$MIG_LOGS_2" "already applied\|No pending" "REQ-004: re-run migrate is a no-op"
 SEED_LOGS_2="$("${COMPOSE[@]}" logs seed 2>/dev/null || true)"
 assert_contains "$SEED_LOGS_2" "skipping" "REQ-005: warm restart seed logs 'skipping'"
+# W4: gate the warm-restart count read on seed finishing (skip path also exits 0).
+wait_seed_done 60 || fail "REQ-005: seed did not reach exited/0 within 60s on warm restart"
 WARM_ARTISTS="$(count_rows artists)"
 WARM_TRACKS="$(count_rows tracks)"
 assert_eq "$WARM_ARTISTS" "$BASE_ARTISTS" "REQ-005/010: warm restart — artists unchanged"
@@ -393,6 +473,8 @@ assert_eq "$WARM_TRACKS" "$BASE_TRACKS" "REQ-005/010: warm restart — tracks un
 for c in "$DB_C" "$BACKEND_C" "$FRONTEND_C"; do
   wait_healthy "$c" 120 || fail "REQ-010: $c not healthy after down -v + up"
 done
+# W4: gate the re-seed count read on seed finishing its re-seed transaction.
+wait_seed_done 60 || fail "REQ-010: seed did not reach exited/0 within 60s after down -v + up"
 RESET_ARTISTS="$(count_rows artists)"
 RESET_TRACKS="$(count_rows tracks)"
 if [ "$RESET_ARTISTS" -gt 0 ] && [ "$RESET_TRACKS" -gt 0 ]; then
@@ -414,12 +496,18 @@ say "=== Phase D: REQ-009 infra-only diff guard (logger.ts exception) ==="
 # line ("N files changed...") contains no filename and would falsely survive a
 # path filter. The ONLY permitted path is backend/src/logger.ts (the
 # @Optional() AppLogger DI fix — REQ-009 amendment 2026-07-08).
+# C1 fix: the repo has NO root `prisma/` — the locked paths live under
+# `backend/prisma/`. The original `prisma/...` pathspecs were silent no-ops
+# (`git diff --name-only main -- prisma/seed.ts` returns nothing), so the three
+# locked path-groups were UN-guarded. Corrected + the whole `backend/prisma`
+# directory added so seed.spec.ts (and anything else) is covered too.
 DIFF_NAMES="$(git diff --name-only main -- \
   backend/src \
   frontend/src \
-  prisma/schema.prisma \
-  prisma/migrations \
-  prisma/seed.ts \
+  backend/prisma/schema.prisma \
+  backend/prisma/migrations \
+  backend/prisma/seed.ts \
+  backend/prisma \
   backend/package.json \
   frontend/package.json 2>/dev/null || true)"
 # Remove the one permitted path (exact, whole-line); anything left is a violation.
