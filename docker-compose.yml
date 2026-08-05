@@ -1,26 +1,17 @@
-# Local development compose for the Spotify clone backend.
+# docker-compose.yml — single-origin TLS-terminated demo (5 services, default).
+# DOCKER-PR1-08 (REQ-DOCKER-001/003/004/007/010). Design §6 verbatim.
 #
-# Default posture (DESIGN section 7.1): brings up PostgreSQL 16 only —
-# run the backend on the host with `pnpm start:dev`. The `backend`
-# service below is OPT-IN via the `demo` profile so the default
-# `docker-compose up` keeps the host-run posture unchanged.
-#
-# `docker-compose --profile demo up` brings up the backend with the
-# audio mount wired (PRD section 10.5 demo flow:
-# "login → buscar → reproducir → seek"). The service block anticipates
-# a Dockerfile under ./backend (not yet landed); until then, the
-# host-run path remains the default for local dev.
+# REWRITES the previous 2-service compose (db default + opt-in demo profile).
+# The demo profile is REMOVED — all five services run by default (REQ-DOCKER-001).
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine          # S3 minor pin
     container_name: spotify-clon-db
     environment:
       POSTGRES_DB: spotify_clone
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -29,38 +20,85 @@ services:
       timeout: 3s
       retries: 10
 
-  # OPT-IN demo profile (PB-PR3-04 / PB-PR2-14, REQ-PLAY-008 + PRD §10.5).
-  # Run with `docker-compose --profile demo up`. Requires ./backend/Dockerfile
-  # (future work); until it lands, the host-run path stays the dev default.
-  #
-  # Audio mount math (C8 fix, DESIGN §6): the seed writes file paths
-  # rooted at `/audio/<album>/<track>.mp3`. `FsAudioStorage.resolve`
-  # strips the leading `/` and joins under `AUDIO_STORAGE_PATH`, so
-  # `AUDIO_STORAGE_PATH=/data` resolves `/audio/x/y.mp3` to
-  # `/data/audio/x/y.mp3` inside the container. The volume mount maps
-  # the repo's `./audio` directory to `/data/audio` (read-only — the
-  # service never writes audio) so the resolved path lands exactly
-  # where the file lives on disk. Setting `AUDIO_STORAGE_PATH=/data/audio`
-  # instead would double the segment to `/data/audio/audio/...` and
-  # every request would 404.
-  backend:
-    profiles: ["demo"]
+  migrate:
     build:
       context: ./backend
-    container_name: spotify-clon-backend
+      target: builder
+    container_name: spotify-clon-migrate
     depends_on:
-      db:
-        condition: service_healthy
+      db: { condition: service_healthy }
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/spotify_clone
-      # Parent of the audio root (NOT /data/audio — see comment above).
+    command: ["pnpm", "exec", "prisma", "migrate", "deploy"]
+    restart: "no"                        # one-shot; exit 0 → downstream unblocked
+
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    container_name: spotify-clon-backend
+    depends_on:
+      db: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    environment: &backend-env
+      NODE_ENV: production
+      COOKIE_SECURE: "true"              # REQ-DOCKER-007 — satisfies config.ts superRefine
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/spotify_clone
+      # AUDIO_STORAGE_PATH is the PARENT of the audio root (C8 fix, preserved
+      # verbatim). FsAudioStorage.resolve strips the leading '/' and joins
+      # under AUDIO_STORAGE_PATH, so a seed path /audio/x/y.mp3 resolves to
+      # /data/audio/x/y.mp3. Setting /data/audio would double the segment and
+      # 404 every request.
       AUDIO_STORAGE_PATH: /data
-    ports:
-      - "3000:3000"
+      # Demo-only JWT secrets — MUST be ≥32 chars (config.ts enforces min 32 or
+      # loadConfig fail-fasts → backend never healthy). Documented as demo-only;
+      # real secrets are the real-CA/CI follow-up. DO NOT reuse in production.
+      JWT_ACCESS_SECRET: "demo-access-secret-do-not-use-32-chars-min!!"
+      JWT_REFRESH_SECRET: "demo-refresh-secret-do-not-use-32-chars-min!!"
     volumes:
-      # Read-only mount of the repo's audio/ dir → /data/audio inside
-      # the container (matches FsAudioStorage.resolve expectations).
-      - ./audio:/data/audio:ro
+      - ./audio:/data/audio:ro           # read-only host mount (REQ-DOCKER-006)
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      # start_period=30s (R2-S1): bounded budget for Nest boot + Prisma client
+      # init + argon2 load. Serialized phases sum to <120s of the REQ-DOCKER-001
+      # cold-start window measured from `up -d` RETURN (build time excluded).
+      start_period: 30s
+      retries: 5
+    # Backend port UNPUBLISHED (internal only — only frontend's :80/:443 reach host).
+
+  seed:
+    build:
+      context: ./backend
+      target: builder
+    container_name: spotify-clon-seed
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    # seed.ts calls loadConfig() → validates the FULL env schema, so the seed
+    # container needs the SAME env map as backend (incl. JWT_*, AUDIO_STORAGE_PATH).
+    environment: *backend-env
+    command: ["sh", "scripts/seed-with-guard.sh"]
+    restart: "no"
+
+  frontend:
+    build:
+      context: ./frontend
+      target: runtime
+    container_name: spotify-clon-frontend
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      - "80:80"
+      - "443:443"
+    healthcheck:
+      # R2-C1: direct :443 TLS probe with --no-check-certificate — no redirect
+      # follow. IPv4 loopback pinned (127.0.0.1, NOT localhost) because busybox
+      # resolves localhost IPv6-first to [::1] while nginx binds 443 IPv4-only.
+      test: ["CMD-SHELL", "wget -q -O- --no-check-certificate https://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   db_data:
