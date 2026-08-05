@@ -322,6 +322,106 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Playlists PR-1 extensions (F5 — design §14.5).
+  // These three portfolio assertions land here — they guard the playlists
+  // domain artefacts (entity methods + driven port shape) and the test-harness
+  // truncate coverage that the new junction + owner tables require. The two
+  // entity/port assertions are RED until WORK-PR1-04 lands the artefacts; the
+  // truncate assertion is GREEN as soon as test-db.ts is edited (this unit).
+  // ---------------------------------------------------------------------------
+
+  it('test-db truncate covers playlists junction + owner tables (F5 — design §14.5)', () => {
+    const testDbPath = resolve(process.cwd(), 'test/helpers/test-db.ts');
+    expect(existsSync(testDbPath), 'test/helpers/test-db.ts must exist').toBe(true);
+    const source = readFileSync(testDbPath, 'utf8');
+
+    // playlist_tracks (junction) BEFORE playlists, both BEFORE tracks/users.
+    // The composite FK playlist_tracks.playlist_id -> playlists.id and the
+    // RESTRICT FK playlist_tracks.track_id -> tracks.id require this order.
+    // The explicit CASCADE would handle it defensively, but the literal
+    // ordering documents intent and survives a future CASCADE removal.
+    const requiredTables = ['"playlist_tracks"', '"playlists"'];
+    for (const table of requiredTables) {
+      expect(
+        source,
+        `truncate must include ${table} so playlists tests start from a clean slate`,
+      ).toContain(table);
+    }
+    // Junction-first ordering: "playlist_tracks" must appear before "playlists"
+    // in the TRUNCATE statement.
+    const junctionIdx = source.indexOf('"playlist_tracks"');
+    const playlistsIdx = source.indexOf('"playlists"');
+    expect(junctionIdx, 'playlist_tracks must be in the TRUNCATE').toBeGreaterThanOrEqual(0);
+    expect(playlistsIdx, 'playlists must be in the TRUNCATE').toBeGreaterThan(junctionIdx);
+  });
+
+  it('requires Playlist entity to expose static create/reconstruct + instance rename/ensureOwnedBy (F5 — design §14.5)', () => {
+    const playlistPath = 'contexts/playlists/domain/playlist.entity.ts';
+    const absolute = resolve(srcRoot, playlistPath);
+    expect(existsSync(absolute), `expected entity file ${playlistPath}`).toBe(true);
+
+    const source = loadSourceFile(absolute);
+    const cls = source.getClasses().find((c) => c.getName() === 'Playlist');
+    expect(cls, 'Playlist class must exist').toBeDefined();
+
+    // static create — validating factory (LOCKED product #5).
+    const create = cls!.getMethods().find((m) => m.getName() === 'create');
+    expect(create, 'Playlist must declare a create() method').toBeDefined();
+    expect(create!.isStatic(), 'Playlist.create must be static').toBe(true);
+
+    // static reconstruct — trusted hydration (mirrors User.reconstruct).
+    const reconstruct = cls!.getMethods().find((m) => m.getName() === 'reconstruct');
+    expect(reconstruct, 'Playlist must declare a reconstruct() method').toBeDefined();
+    expect(reconstruct!.isStatic(), 'Playlist.reconstruct must be static').toBe(true);
+
+    // instance rename — mutates title, same 1..100 invariant.
+    const rename = cls!.getMethods().find((m) => m.getName() === 'rename');
+    expect(rename, 'Playlist must declare a rename() method').toBeDefined();
+    expect(rename!.isStatic(), 'Playlist.rename must be an instance method').toBe(false);
+
+    // instance ensureOwnedBy — LOCKED design R2: ownership invariant on entity.
+    const ensureOwnedBy = cls!.getMethods().find((m) => m.getName() === 'ensureOwnedBy');
+    expect(ensureOwnedBy, 'Playlist must declare an ensureOwnedBy() method').toBeDefined();
+    expect(ensureOwnedBy!.isStatic(), 'Playlist.ensureOwnedBy must be an instance method').toBe(false);
+  });
+
+  it('requires PlaylistsRepositoryPort to be a framework-free interface under domain/ports (F5 — design §14.5)', () => {
+    const portPath = 'contexts/playlists/domain/ports/playlists-repository.port.ts';
+    const absolute = resolve(srcRoot, portPath);
+    expect(existsSync(absolute), `expected port file ${portPath}`).toBe(true);
+
+    const source = loadSourceFile(absolute);
+
+    // Must declare the interface (mirrors the catalog port-shape assertion).
+    const interfaceNames = source.getInterfaces().map((i) => i.getName());
+    expect(
+      interfaceNames,
+      'PlaylistsRepositoryPort must be declared as an interface',
+    ).toContain('PlaylistsRepositoryPort');
+
+    // Must NOT be a class — a class would bypass the "every Port is a TS
+    // interface" rule and let the application layer depend on a concrete type.
+    const classesNamedPort = source
+      .getClasses()
+      .map((c) => c.getName())
+      .filter((n): n is string => Boolean(n) && n === 'PlaylistsRepositoryPort');
+    expect(classesNamedPort, 'PlaylistsRepositoryPort must not be a class').toEqual([]);
+
+    // Framework-free (mirrors the catalog read-models + pagination check):
+    // pure TS interface, zero NestJS / Prisma / express / rxjs / pino imports.
+    const forbidden = ['@prisma/client', '@nestjs/common', '@nestjs/core', 'prisma', 'express', 'rxjs', 'pino'];
+    for (const declaration of source.getImportDeclarations()) {
+      const specifier = declaration.getModuleSpecifierValue();
+      for (const banned of forbidden) {
+        expect(
+          specifier,
+          `PlaylistsRepositoryPort must not import "${banned}" (pure TS interface, framework-free)`,
+        ).not.toContain(banned);
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Catalog PR-2a extensions (CAT-PR2a-13, per R2-CRIT-3).
   // These four assertions land here — NOT in PR-1 — because they guard catalog
   // domain artefacts (entities / read-models / port / shared pagination) that

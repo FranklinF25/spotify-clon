@@ -6,6 +6,16 @@
  *  - `INVALID_QUERY` (PR-2a) — `InvalidQueryError` (catalog search empty-q).
  * `NOT_FOUND` was already in the vocabulary; catalog reuses it via
  * `NotFoundError` rather than introducing a catalog-specific code.
+ *
+ * Playlists addition (F5 — design R1):
+ *  - `UNPROCESSABLE_ENTITY` — `UnprocessableEntityError`. Covers REQ-P-007
+ *    scenario "Unknown trackId is rejected with 422": a well-formed request
+ *    that references a non-existent resource (the `trackId` IS a valid UUID,
+ *    it just does not resolve). Distinct from `VALIDATION_ERROR` (400,
+ *    malformed payload) and `NOT_FOUND` (404, the addressed resource itself
+ *    is missing). Keeps the 1:1 code↔status correspondence that
+ *    `GlobalExceptionFilter.codeForStatus` and the frontend
+ *    `FORM_OWNED_CODES` filter both implicitly assume.
  */
 export type ErrorCode =
   | 'VALIDATION_ERROR'
@@ -15,7 +25,8 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'INTERNAL_ERROR'
   | 'INVALID_PAGINATION'
-  | 'INVALID_QUERY';
+  | 'INVALID_QUERY'
+  | 'UNPROCESSABLE_ENTITY';
 
 /**
  * Field-level detail attached to validation errors.
