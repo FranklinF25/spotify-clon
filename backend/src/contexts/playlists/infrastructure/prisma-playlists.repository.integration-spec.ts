@@ -36,10 +36,15 @@ describe('PrismaPlaylistsRepository (integration, Postgres 16 testcontainer)', (
   let repo: PrismaPlaylistsRepository;
 
   beforeAll(async () => {
+    // 60s hookTimeout: testcontainers + Postgres 16 image pull / startup can
+    // exceed the default 10s when many integration specs boot containers in
+    // parallel and Docker competes for CPU. Same root cause as the pre-existing
+    // prisma/seed.spec.ts flake; this per-spec bump avoids touching
+    // vitest.config.ts (out of scope for PR-1).
     db = await startTestDb();
     prisma = db.prisma;
     repo = new PrismaPlaylistsRepository(prisma);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await db.cleanup();
