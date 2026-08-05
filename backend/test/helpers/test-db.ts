@@ -55,11 +55,18 @@ export async function startTestDb(): Promise<TestDbContext> {
     container,
     connectionString,
     truncate: async () => {
-      // Catalog tables come first so the FK CASCADE has nothing to descend
-      // into; identity tables follow. RESTART IDENTITY resets any sequence
-      // (currently none — UUIDs are dbgenerated — but defensive).
+      // Junction tables come first so the FK CASCADE has nothing to descend
+      // into; then playlist owners, then catalog, then identity. RESTART
+      // IDENTITY resets any sequence (currently none — UUIDs are dbgenerated
+      // — but defensive).
+      //
+      // F5 (playlists) ordering: playlist_tracks (junction) BEFORE playlists,
+      // and both BEFORE tracks/users — the composite FK
+      // playlist_tracks.playlist_id -> playlists.id and the FK
+      // playlist_tracks.track_id -> tracks.id (RESTRICT) require this order
+      // even though the explicit CASCADE would handle it defensively.
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "tracks", "albums", "artists", "refresh_tokens", "users" RESTART IDENTITY CASCADE;',
+        'TRUNCATE TABLE "playlist_tracks", "playlists", "tracks", "albums", "artists", "refresh_tokens", "users" RESTART IDENTITY CASCADE;',
       );
     },
     cleanup: async () => {
