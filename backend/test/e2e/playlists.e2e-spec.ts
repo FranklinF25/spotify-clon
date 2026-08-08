@@ -620,4 +620,476 @@ describe('Playlists HTTP API (e2e)', () => {
       expect(res.body.error.code).toBe('NOT_FOUND');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // REQ-P-009 — Remove Track from Playlist (Compact-on-Remove)
+  // ---------------------------------------------------------------------------
+
+  describe('REQ-P-009 — Remove track (compact-on-remove)', () => {
+    it('Middle removal compacts trailing positions', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'Compact' });
+      const playlistId = created.body.id;
+
+      for (const tid of [T1, T2, T3]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      // Delete the middle track (position 2 = T2).
+      const res = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/playlists/${playlistId}/tracks/2`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(res.status).toBe(204);
+
+      // GET tracks → [T1, T3] (T3 shifted from position 3 to 2).
+      const tracksRes = await request(ctx.app.getHttpServer())
+        .get(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+      expect(tracksRes.body.map((t: { id: string }) => t.id)).toEqual([T1, T3]);
+
+      // DB-level: positions stay dense (1, 2) — compact-on-remove invariant.
+      const rows = await prisma.playlistTrack.findMany({
+        where: { playlistId },
+        orderBy: { position: 'asc' },
+      });
+      expect(rows.map((r) => r.position)).toEqual([1, 2]);
+    });
+
+    it('Last-position removal needs no shift', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'LastRemove' });
+      const playlistId = created.body.id;
+
+      for (const tid of [T1, T2, T3]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      const res = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/playlists/${playlistId}/tracks/3`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(res.status).toBe(204);
+
+      const tracksRes = await request(ctx.app.getHttpServer())
+        .get(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+      expect(tracksRes.body.map((t: { id: string }) => t.id)).toEqual([T1, T2]);
+    });
+
+    it('Only-track removal leaves an empty but existing playlist', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'OnlyTrack' });
+      const playlistId = created.body.id;
+
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ trackId: T1 });
+
+      const res = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/playlists/${playlistId}/tracks/1`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(res.status).toBe(204);
+
+      // GET tracks → [] (empty).
+      const tracksRes = await request(ctx.app.getHttpServer())
+        .get(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+      expect(tracksRes.status).toBe(200);
+      expect(tracksRes.body).toEqual([]);
+
+      // GET playlist → still 200 (playlist itself is not deleted).
+      const playlistRes = await request(ctx.app.getHttpServer())
+        .get(`/api/v1/playlists/${playlistId}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+      expect(playlistRes.status).toBe(200);
+    });
+
+    it('Non-existent position returns 404 NOT_FOUND', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'NoPos' });
+      const playlistId = created.body.id;
+
+      for (const tid of [T1, T2, T3]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      const res = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/playlists/${playlistId}/tracks/5`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+
+      // No rows removed — positions stay 1, 2, 3.
+      const count = await prisma.playlistTrack.count({ where: { playlistId } });
+      expect(count).toBe(3);
+    });
+
+    it('Missing playlist returns 404 NOT_FOUND', async () => {
+      const res = await request(ctx.app.getHttpServer())
+        .delete('/api/v1/playlists/00000000-0000-0000-0000-0000000000ff/tracks/1')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+    });
+
+    it('Non-owner remove is rejected with 403 FORBIDDEN', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'U1 Tracks' });
+      const playlistId = created.body.id;
+
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ trackId: T1 });
+
+      const res = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/playlists/${playlistId}/tracks/1`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // REQ-P-010 — Reorder Playlist Tracks ({ from, to })
+  // ---------------------------------------------------------------------------
+
+  describe('REQ-P-010 — Reorder playlist tracks', () => {
+    it('Forward move shifts intermediate tracks up ([A,B,C,D] from=2 to=4 → [A,C,D,B])', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ReorderFwd' });
+      const playlistId = created.body.id;
+
+      // [T1, T2, T3, T4] at positions 1..4.
+      for (const tid of [T1, T2, T3, T4]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      const res = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ from: 2, to: 4 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.map((r: { trackId: string }) => r.trackId)).toEqual([
+        T1,
+        T3,
+        T4,
+        T2,
+      ]);
+      // Positions stay dense (1..4).
+      expect(res.body.map((r: { position: number }) => r.position)).toEqual([
+        1,
+        2,
+        3,
+        4,
+      ]);
+
+      // Cross-check via GET /tracks (hydrated render matches the lightweight
+      // reorder response).
+      const tracksRes = await request(ctx.app.getHttpServer())
+        .get(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+      expect(tracksRes.body.map((t: { id: string }) => t.id)).toEqual([
+        T1,
+        T3,
+        T4,
+        T2,
+      ]);
+    });
+
+    it('Backward move shifts intermediate tracks down ([A,B,C,D] from=4 to=1 → [D,A,B,C])', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ReorderBwd' });
+      const playlistId = created.body.id;
+
+      for (const tid of [T1, T2, T3, T4]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      const res = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ from: 4, to: 1 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.map((r: { trackId: string }) => r.trackId)).toEqual([
+        T4,
+        T1,
+        T2,
+        T3,
+      ]);
+    });
+
+    it('No-op reorder is idempotent ([A,B,C] from=2 to=2 → [A,B,C])', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ReorderNoop' });
+      const playlistId = created.body.id;
+
+      for (const tid of [T1, T2, T3]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      const res = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ from: 2, to: 2 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.map((r: { trackId: string }) => r.trackId)).toEqual([
+        T1,
+        T2,
+        T3,
+      ]);
+    });
+
+    it('Out-of-range from=0 or to=99 is rejected with 422 UNPROCESSABLE_ENTITY', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ReorderRange' });
+      const playlistId = created.body.id;
+
+      for (const tid of [T1, T2, T3]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      // from=0 — rejected by DTO .positive().
+      const res1 = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ from: 0, to: 2 });
+      expect(res1.status).toBe(422);
+      expect(res1.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+
+      // to=99 — passes DTO but fails the use case's maxPosition check.
+      const res2 = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ from: 2, to: 99 });
+      expect(res2.status).toBe(422);
+      expect(res2.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+
+      // Ordering unchanged after rejected reorders.
+      const tracksRes = await request(ctx.app.getHttpServer())
+        .get(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+      expect(tracksRes.body.map((t: { id: string }) => t.id)).toEqual([
+        T1,
+        T2,
+        T3,
+      ]);
+    });
+
+    it('Non-integer or missing from/to is rejected with 422 UNPROCESSABLE_ENTITY', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ReorderBadShape' });
+      const playlistId = created.body.id;
+
+      // Non-integer from=1.5.
+      const res1 = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ from: 1.5, to: 2 });
+      expect(res1.status).toBe(422);
+      expect(res1.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+
+      // Missing to.
+      const res2 = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ from: 1 });
+      expect(res2.status).toBe(422);
+      expect(res2.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+
+      // Empty body.
+      const res3 = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({});
+      expect(res3.status).toBe(422);
+      expect(res3.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // REQ-P-011 — Ownership Invariant & ForbiddenError
+  // ---------------------------------------------------------------------------
+
+  describe('REQ-P-011 — Ownership invariant & ForbiddenError', () => {
+    it('Non-owner PATCH /:id is rejected with 403 FORBIDDEN AND no write occurred', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'Original Title' });
+      const playlistId = created.body.id;
+
+      const res = await request(ctx.app.getHttpServer())
+        .patch(`/api/v1/playlists/${playlistId}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`)
+        .send({ title: 'Hacked' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+
+      // No write — title unchanged.
+      const row = await prisma.playlist.findUnique({ where: { id: playlistId } });
+      expect(row?.title).toBe('Original Title');
+    });
+
+    it('Non-owner DELETE /:id is rejected with 403 FORBIDDEN AND no write occurred', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'Protected' });
+      const playlistId = created.body.id;
+
+      const res = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/playlists/${playlistId}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+
+      // No write — playlist still exists.
+      expect(await prisma.playlist.count({ where: { id: playlistId } })).toBe(1);
+    });
+
+    it('Non-owner POST /:id/tracks is rejected with 403 FORBIDDEN AND no write occurred', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ProtectedTracks' });
+      const playlistId = created.body.id;
+
+      const res = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`)
+        .send({ trackId: T1 });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+
+      // No write — zero playlist_tracks rows.
+      expect(await prisma.playlistTrack.count({ where: { playlistId } })).toBe(0);
+    });
+
+    it('Non-owner DELETE /:id/tracks/:position is rejected with 403 FORBIDDEN AND no write occurred', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ProtectedRemove' });
+      const playlistId = created.body.id;
+
+      // Seed one track.
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/tracks`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ trackId: T1 });
+
+      const res = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/playlists/${playlistId}/tracks/1`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+
+      // No write — one row still present.
+      expect(await prisma.playlistTrack.count({ where: { playlistId } })).toBe(1);
+    });
+
+    it('Non-owner POST /:id/reorder is rejected with 403 FORBIDDEN AND no write occurred', async () => {
+      const created = await request(ctx.app.getHttpServer())
+        .post('/api/v1/playlists')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+        .send({ title: 'ProtectedReorder' });
+      const playlistId = created.body.id;
+
+      // Seed T1 at pos 1, T2 at pos 2.
+      for (const tid of [T1, T2]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/playlists/${playlistId}/tracks`)
+          .set('Authorization', `Bearer ${ctx.tokens.U1.token}`)
+          .send({ trackId: tid });
+      }
+
+      const res = await request(ctx.app.getHttpServer())
+        .post(`/api/v1/playlists/${playlistId}/reorder`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`)
+        .send({ from: 1, to: 2 });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+
+      // No write — positions unchanged (T1=1, T2=2).
+      const rows = await prisma.playlistTrack.findMany({
+        where: { playlistId },
+        orderBy: { position: 'asc' },
+      });
+      expect(rows.map((r) => ({ position: r.position, trackId: r.trackId }))).toEqual([
+        { position: 1, trackId: T1 },
+        { position: 2, trackId: T2 },
+      ]);
+    });
+
+    it('Mutation on a missing playlist returns 404, not 403 (NotFoundError precedence)', async () => {
+      const missingId = '00000000-0000-0000-0000-0000000000ff';
+
+      // The existence check runs BEFORE the ownership check — a non-owner
+      // cannot learn whether a UUID exists. Test with PATCH (representative;
+      // loadOwnedPlaylist is the same helper for all five mutations).
+      const res = await request(ctx.app.getHttpServer())
+        .patch(`/api/v1/playlists/${missingId}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`)
+        .send({ title: 'Ghost' });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+    });
+  });
 });
