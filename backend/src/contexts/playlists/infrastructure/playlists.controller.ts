@@ -170,7 +170,11 @@ export class PlaylistsController {
     });
   }
 
+  // REQ-P-010: @HttpCode(200) — NestJS defaults @Post to 201, but the spec
+  // pins the reorder success response to HTTP 200 (the operation rewrites an
+  // existing resource; it does not create a new one).
   @Post('playlists/:id/reorder')
+  @HttpCode(200)
   async reorder(
     @Param('id') id: string,
     @Body() body: unknown,
