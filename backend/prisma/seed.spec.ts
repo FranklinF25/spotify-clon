@@ -18,9 +18,15 @@ import { runSeed, type SeedSnapshot } from './seed';
 describe('prisma/seed — deterministic synthetic catalog', () => {
   let db: TestDbContext;
 
+  // hookTimeout bumped to 60s — under full-suite parallelism (catalog +
+  // playback + playlists e2e + integration specs all booting Postgres 16
+  // testcontainers concurrently) the default 10s beforeAll was racing the
+  // container-start and timing out. Mirrors the playlists integration-spec
+  // bump (79abadf). The spec itself is deterministic; this is a concurrency
+  // mitigation, not a relaxed assertion.
   beforeAll(async () => {
     db = await startTestDb();
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await db.cleanup();
