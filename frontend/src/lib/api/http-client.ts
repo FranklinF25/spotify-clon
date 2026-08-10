@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { useAuthStore } from '@/store/auth.store';
 import { endpoints } from '@/lib/api/endpoints';
-import type { RefreshResponse } from '@/types/api';
+import type { ApiErrorCode, RefreshResponse } from '@/types/api';
 
 /**
  * Typed HTTP client (DESIGN §6.1). Owns the four seams reviewers audit:
@@ -25,7 +25,7 @@ export interface ErrorDetail {
 
 export class ApiError extends Error {
   constructor(
-    public readonly code: string,
+    public readonly code: ApiErrorCode,
     message: string,
     public readonly status: number,
     public readonly details: ErrorDetail[] = [],
@@ -37,6 +37,30 @@ export class ApiError extends Error {
 
 const GENERIC = (status: number) =>
   new ApiError('UNKNOWN', 'Unexpected error', status);
+
+// The known backend error vocabulary (R-app-2). The wire `code` is a free
+// `string`; we coerce anything outside this set to `'UNKNOWN'` so `ApiError.code`
+// is always a valid `ApiErrorCode` (the union stays exhaustive at consumption
+// sites — `error.code === 'NOT_FOUND'` etc. — without a runtime risk of an
+// unrecognised literal slipping through typed as itself).
+const KNOWN_CODES: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
+  'VALIDATION_ERROR',
+  'UNAUTHORIZED',
+  'FORBIDDEN',
+  'NOT_FOUND',
+  'CONFLICT',
+  'INTERNAL_ERROR',
+  'INVALID_PAGINATION',
+  'INVALID_QUERY',
+  'UNPROCESSABLE_ENTITY',
+  'UNKNOWN',
+]);
+
+function toApiErrorCode(wire: string): ApiErrorCode {
+  return KNOWN_CODES.has(wire as ApiErrorCode)
+    ? (wire as ApiErrorCode)
+    : 'UNKNOWN';
+}
 
 // zod-validated envelope shape (replaces the hand-rolled typeof check — JD
 // fix #16). `safeParse` means a malformed-but-present `error` object (e.g.
@@ -60,7 +84,7 @@ function parseEnvelope(status: number, body: unknown): never {
   const parsed = envelopeSchema.safeParse(body);
   if (parsed.success) {
     throw new ApiError(
-      parsed.data.error.code,
+      toApiErrorCode(parsed.data.error.code),
       parsed.data.error.message,
       status,
       parsed.data.error.details ?? [],
