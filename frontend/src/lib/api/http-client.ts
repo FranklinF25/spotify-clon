@@ -265,6 +265,10 @@ export const httpClient = {
     request<T>('GET', path, undefined, opts),
   post: <T>(path: string, body?: unknown, opts?: RequestOptions): Promise<T> =>
     request<T>('POST', path, body, opts),
+  patch: <T>(path: string, body?: unknown, opts?: RequestOptions): Promise<T> =>
+    request<T>('PATCH', path, body, opts),
+  delete: <T>(path: string, opts?: RequestOptions): Promise<T> =>
+    request<T>('DELETE', path, undefined, opts),
   getBlob: (path: string, opts?: RequestOptions): Promise<Blob> =>
     getBlob(path, opts),
 };
