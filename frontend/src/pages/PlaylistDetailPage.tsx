@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { usePlaylist } from '@/features/playlists/hooks/use-playlist';
 import { usePlaylistTracks } from '@/features/playlists/hooks/use-playlist-tracks';
+import { useAddTrack } from '@/features/playlists/hooks/use-add-track';
 import { usePlayerStore } from '@/store/player.store';
 import { ApiError } from '@/lib/api/http-client';
 import { Spinner } from '@/components/atoms/Spinner/Spinner';
@@ -28,6 +29,7 @@ export function PlaylistDetailPage() {
   const { id = '' } = useParams();
   const { data: playlist, isLoading, error } = usePlaylist(id);
   const tracksQuery = usePlaylistTracks(id);
+  const addTrack = useAddTrack();
   const playFromList = usePlayerStore((s) => s.playFromList);
 
   const tracks = tracksQuery.data ?? [];
@@ -60,7 +62,10 @@ export function PlaylistDetailPage() {
         tracks={tracks}
         isLoading={tracksQuery.isLoading}
       />
-      <AddTrackForm playlistId={id} />
+      <AddTrackForm
+        onSubmit={(trackId) => addTrack.mutateAsync({ id, trackId })}
+        isPending={addTrack.isPending}
+      />
     </section>
   );
 }

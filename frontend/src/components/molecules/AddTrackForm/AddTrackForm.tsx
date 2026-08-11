@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { z } from 'zod';
-import { useAddTrack } from '@/features/playlists/hooks/use-add-track';
 import { ApiError } from '@/lib/api/http-client';
 import { Input } from '@/components/atoms/Input/Input';
 import { Button } from '@/components/atoms/Button/Button';
@@ -9,29 +8,35 @@ import styles from './AddTrackForm.module.css';
 /**
  * addTrackSchema — zod mirror of the minimal client gate. The only honest
  * client-side check is "non-empty trackId" (the backend owns the 422 unknown-
- * track validation). Validating PRE-request means an empty submit never issues
- * a POST /playlists/:id/tracks.
+ * track validation). Validating PRE-request means an empty submit never calls
+ * onSubmit (so no POST /playlists/:id/tracks is issued).
  */
 const addTrackSchema = z.object({
   trackId: z.string().min(1, 'track id is required'),
 });
 
 /**
- * AddTrackForm molecule (REQ-FE-015, DESIGN §7).
+ * AddTrackForm molecule (REQ-FE-015, DESIGN §7). PRESENTATIONAL — owns the
+ * zod gate + honest error surfacing, but delegates the mutation to the parent
+ * page via `onSubmit`. This keeps the molecule free of `features/` imports
+ * (atomic-design §3 dependency rule: molecules never import hooks/store/pages;
+ * `lib/` + `atoms/` only). The parent wires `useAddTrack` and passes the
+ * handler + pending flag.
  *
- * Track picker for the demo: a simple trackId input → `useAddTrack` mutation.
- * Honest error surfacing:
+ * Honest error surfacing (the thrown ApiError.code drives the message):
  *  - 422 UNPROCESSABLE_ENTITY (unknown trackId) → "track not found"
  *  - 403 FORBIDDEN (non-owner) → "you are not the owner"
- *  - 201 success → input resets; `useAddTrack.onSuccess` invalidates the
- *    tracks query, so the parent list refetches and the new track appears.
+ *  - success → input resets (the parent's tracks-query invalidation, fired
+ *    inside `useAddTrack.onSuccess`, appends the track on refetch).
  */
 interface AddTrackFormProps {
-  playlistId: string;
+  /** Submit handler owned by the parent (wires the useAddTrack mutation). */
+  onSubmit: (trackId: string) => Promise<unknown>;
+  /** Pending flag from the parent's mutation (disables the submit button). */
+  isPending?: boolean;
 }
 
-export function AddTrackForm({ playlistId }: AddTrackFormProps) {
-  const addTrack = useAddTrack();
+export function AddTrackForm({ onSubmit, isPending }: AddTrackFormProps) {
   const [trackId, setTrackId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +49,7 @@ export function AddTrackForm({ playlistId }: AddTrackFormProps) {
     }
     setError(null);
     try {
-      await addTrack.mutateAsync({ id: playlistId, trackId: parsed.data.trackId });
+      await onSubmit(parsed.data.trackId);
       setTrackId('');
     } catch (e) {
       if (e instanceof ApiError) {
@@ -79,7 +84,7 @@ export function AddTrackForm({ playlistId }: AddTrackFormProps) {
           {error}
         </p>
       )}
-      <Button type="submit" variant="primary" disabled={addTrack.isPending}>
+      <Button type="submit" variant="primary" disabled={isPending}>
         Add track
       </Button>
     </form>
