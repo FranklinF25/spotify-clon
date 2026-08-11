@@ -11,6 +11,8 @@ import { HomePage } from '@/pages/HomePage';
 import { AlbumPage } from '@/pages/AlbumPage';
 import { ArtistPage } from '@/pages/ArtistPage';
 import { SearchPage } from '@/pages/SearchPage';
+import { PlaylistsPage } from '@/pages/PlaylistsPage';
+import { PlaylistDetailPage } from '@/pages/PlaylistDetailPage';
 import { AuthLayout } from '@/components/templates/AuthLayout/AuthLayout';
 import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
 
@@ -23,10 +25,12 @@ import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
  *    `<AuthLayout>` (the centered-card public shell).
  *  - Protected routes sit under `<RequireAuth>` + `<AppLayout>` (Sidebar +
  *    Topbar + Outlet + PlayerBarSlot). The nested children:
- *      /            HomePage (featured albums — REQ-FE-009)
- *      /albums/:id  AlbumPage (tracks + queue seeding — REQ-FE-009)
- *      /artists/:id ArtistPage (embedded albums — REQ-FE-009)
- *      /search      SearchPage (PLACEHOLDER — real impl lands FE-PR4-06)
+ *      /                HomePage (featured albums — REQ-FE-009)
+ *      /albums/:id      AlbumPage (tracks + queue seeding — REQ-FE-009)
+ *      /artists/:id     ArtistPage (embedded albums — REQ-FE-009)
+ *      /search          SearchPage (PLACEHOLDER — real impl lands FE-PR4-06)
+ *      /playlists       PlaylistsPage (owner list — REQ-FE-014, PR-3)
+ *      /playlists/:id   PlaylistDetailPage (tracks + play handoff — REQ-FE-015)
  *    React Router keeps AppLayout mounted across these transitions
  *    (REQ-FE-008 "PlayerBar mounted exactly once" depends on this in PR-4).
  *  - The `*` catch-all is OUTSIDE both guard parents so unknown routes
@@ -57,6 +61,8 @@ export const routes: RouteObject[] = [
               { path: 'albums/:id', element: <AlbumPage /> },
               { path: 'artists/:id', element: <ArtistPage /> },
               { path: 'search', element: <SearchPage /> },
+              { path: 'playlists', element: <PlaylistsPage /> },
+              { path: 'playlists/:id', element: <PlaylistDetailPage /> },
             ],
           },
         ],
