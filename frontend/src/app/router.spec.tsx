@@ -6,6 +6,7 @@ import { RedirectIfAuthed } from './RedirectIfAuthed';
 import { AuthLayout } from '@/components/templates/AuthLayout/AuthLayout';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
+import { routes } from './router';
 import { useAuthStore } from '@/store/auth.store';
 
 /**
@@ -95,5 +96,41 @@ describe('router integration — REQ-FE-008 guard + fallback scenarios', () => {
     expect(
       screen.queryByRole('heading', { name: /sign in/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * FE-PR3-05 — playlists route registration (REQ-FE-013/014/015).
+ *
+ * Walks the exported `routes` tree and asserts both `/playlists` and
+ * `/playlists/:id` are registered under the `RequireAuth` + `AppLayout` +
+ * `path: '/'` branch. This is the registration guard — it fails until
+ * `router.tsx` adds the two entries. (Render-resolution is covered by the
+ * PlaylistsPage + PlaylistDetailPage specs via MSW.)
+ */
+function flattenPaths(nodes: typeof routes): string[] {
+  const out: string[] = [];
+  const walk = (nodes: typeof routes, parent = '') => {
+    for (const node of nodes) {
+      const path = node.path
+        ? `${parent}/${node.path}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/'
+        : parent;
+      if (node.path) out.push(path || '/');
+      if (node.children) walk(node.children, path);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+describe('router — playlists route registration (REQ-FE-014/015)', () => {
+  it('registers /playlists (PlaylistsPage)', () => {
+    const paths = flattenPaths(routes);
+    expect(paths).toContain('/playlists');
+  });
+
+  it('registers /playlists/:id (PlaylistDetailPage)', () => {
+    const paths = flattenPaths(routes);
+    expect(paths).toContain('/playlists/:id');
   });
 });

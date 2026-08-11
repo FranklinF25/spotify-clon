@@ -44,4 +44,23 @@ export const endpoints = {
   search: (q: string, type?: 'artist' | 'album' | 'track') =>
     `${BASE}/search?q=${encodeURIComponent(q)}` +
     (type ? `&type=${type}` : ''),
+  // Playlists namespace (PR-3; DESIGN §12.5). Mirrors the artists/albums
+  // shape. `reorder` is HTTP 200 (NOT 201 — backend @HttpCode(200), see PR-2
+  // fix `619c7c8`). IDs are encodeURIComponent-ed; `removeTrack` takes the
+  // numeric position as the LAST path segment (raw — positions are integers).
+  playlists: {
+    list: `${BASE}/playlists`,
+    detail: (id: string) => `${BASE}/playlists/${encodeURIComponent(id)}`,
+    create: `${BASE}/playlists`,
+    rename: (id: string) => `${BASE}/playlists/${encodeURIComponent(id)}`,
+    remove: (id: string) => `${BASE}/playlists/${encodeURIComponent(id)}`,
+    tracks: (id: string) =>
+      `${BASE}/playlists/${encodeURIComponent(id)}/tracks`,
+    addTrack: (id: string) =>
+      `${BASE}/playlists/${encodeURIComponent(id)}/tracks`,
+    removeTrack: (id: string, position: number) =>
+      `${BASE}/playlists/${encodeURIComponent(id)}/tracks/${position}`,
+    reorder: (id: string) =>
+      `${BASE}/playlists/${encodeURIComponent(id)}/reorder`,
+  },
 };

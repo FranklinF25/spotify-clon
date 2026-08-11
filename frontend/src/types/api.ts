@@ -117,3 +117,60 @@ export interface AuthResponse {
 export interface RefreshResponse {
   accessToken: string;
 }
+
+// --- Playlists (PR-3; DESIGN §12.5) ---------------------------------------
+// Hand-synced to the backend `playlists` context projections (same discipline
+// as TrackPrimitive). JSON dates arrive as ISO strings; the backend
+// `toPrimitive()` outputs ARE the public contract.
+//
+// Source of truth (READ before editing):
+//   - Playlist.toPrimitive()      → playlists/domain/playlist.entity.ts
+//   - PlaylistSummary (read-model)→ playlists/domain/read-models.ts
+//   - PlaylistTrack.toPrimitive() → playlists/domain/playlist-track.entity.ts
+
+// Mirrors `Playlist.toPrimitive()`. `createdAt === updatedAt` on create.
+export interface PlaylistPrimitive {
+  id: string;
+  userId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Mirrors `PlaylistSummary` in playlists read-models. The GET /playlists list
+// is owner-scoped server-side, so `userId` is intentionally absent here.
+export interface PlaylistSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Mirrors `PlaylistTrack.toPrimitive()` — the POSITION row (not hydrated).
+// The hydrated GET /:id/tracks response returns TrackPrimitive[] (the
+// survivors, re-sorted by position); this interface describes a single raw
+// row as returned by POST /:id/tracks (201) and POST /:id/reorder (200).
+export interface PlaylistTrackPrimitive {
+  position: number;
+  trackId: string;
+  addedAt: string;
+}
+
+/**
+ * Backend error vocabulary (R-app-2; hand-synced to the backend `ErrorCode`
+ * enum in identity/error-codes.ts + playlists widening). Used to type
+ * `ApiError.code` so consumption sites get exhaustive narrowing.
+ *
+ * `UNKNOWN` is the GENERIC fallback for non-envelope / unrecognised codes.
+ */
+export type ApiErrorCode =
+  | 'VALIDATION_ERROR'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'INTERNAL_ERROR'
+  | 'INVALID_PAGINATION'
+  | 'INVALID_QUERY'
+  | 'UNPROCESSABLE_ENTITY'
+  | 'UNKNOWN';

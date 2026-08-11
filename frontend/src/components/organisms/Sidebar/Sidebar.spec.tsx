@@ -6,18 +6,23 @@ import { server } from '@/test/msw/server';
 import { Sidebar } from './Sidebar';
 
 /**
- * FE-PR3-08 — Sidebar organism (REQ-FE-013, DESIGN §7).
+ * FE-PR3-05 — Sidebar REQ-FE-013 graduation + R-app-4 active-state test.
  *
- * The Playlists + Library backend contexts are `.gitkeep`-only in Slice A, so
- * their Sidebar entries are HONEST disabled placeholders — `<button disabled
- * aria-disabled="true">` labelled "Coming soon", NOT `<a href>`. Clicking them
- * issues NO navigation + NO network request (no dead links, no fake features).
+ * Playlists graduates from a disabled stub into a live `<NavLink to="/playlists">`
+ * (F5 closed). Library STAYS a disabled "coming soon" placeholder (F6 backend
+ * context still `.gitkeep`-only).
  *
- * Home + Search are real NavLinks to the protected routes that DO exist.
+ * R-app-4 (load-bearing): the active-state test mounts the Sidebar at
+ * `/playlists/P1` and asserts the Playlists NavLink receives the `active`
+ * class via React Router v6 prefix matching (the default — `/playlists` with
+ * NO `end` is active for both `/playlists` and `/playlists/:id`). Without this
+ * test the prefix-matching behavior is assumed, not proven. Verified against
+ * react-router-dom@6.30.4 `NavLink` className composition
+ * (`[classNameProp, isActive ? "active" : null].filter(Boolean).join(" ")`).
  */
-function renderSidebar() {
+function renderSidebarAt(initial: string) {
   return render(
-    <MemoryRouter initialEntries={['/']}>
+    <MemoryRouter initialEntries={[initial]}>
       <Sidebar />
     </MemoryRouter>,
   );
@@ -27,52 +32,58 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-describe('Sidebar — honest "coming soon" stubs (REQ-FE-013)', () => {
+describe('Sidebar — REQ-FE-013 graduation (Playlists live, Library stubbed)', () => {
   it('renders the nav landmark', () => {
-    renderSidebar();
+    renderSidebarAt('/');
     expect(screen.getByRole('navigation')).toBeInTheDocument();
   });
 
-  it('renders Home + Search as real links (they have backend contexts)', () => {
-    renderSidebar();
+  it('renders Home + Search + Playlists as real NavLinks', () => {
+    renderSidebarAt('/');
     const home = screen.getByRole('link', { name: /home/i });
     const search = screen.getByRole('link', { name: /search/i });
+    const playlists = screen.getByRole('link', { name: /playlists/i });
     expect(home).toHaveAttribute('href', '/');
     expect(search).toHaveAttribute('href', '/search');
+    expect(playlists).toHaveAttribute('href', '/playlists');
   });
 
-  it('renders Playlists + Library as DISABLED buttons (no href)', () => {
-    renderSidebar();
-    const playlists = screen.getByRole('button', { name: /playlists/i });
+  it('Playlists is NOT a disabled stub (no disabled, no aria-disabled, no coming-soon badge)', () => {
+    renderSidebarAt('/');
+    const playlists = screen.getByRole('link', { name: /playlists/i });
+    expect(playlists).not.toHaveAttribute('disabled');
+    expect(playlists).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('Library remains a disabled placeholder (REQ-FE-013 regression guard)', () => {
+    renderSidebarAt('/');
     const library = screen.getByRole('button', { name: /library/i });
-    expect(playlists).toBeDisabled();
     expect(library).toBeDisabled();
-    expect(playlists).toHaveAttribute('aria-disabled', 'true');
     expect(library).toHaveAttribute('aria-disabled', 'true');
-    // NOT links — no href that could navigate.
-    expect(playlists.tagName).toBe('BUTTON');
     expect(library.tagName).toBe('BUTTON');
+    // Exactly ONE "coming soon" badge remains — Library only.
+    expect(screen.getAllByText(/coming soon/i)).toHaveLength(1);
   });
 
-  it('labels the disabled entries as "coming soon" (honest, not fake)', () => {
-    renderSidebar();
-    expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(2);
+  it('R-app-4: Playlists NavLink is active on /playlists/:id (prefix matching)', () => {
+    renderSidebarAt('/playlists/P1');
+    const playlists = screen.getByRole('link', { name: /playlists/i });
+    expect(playlists).toHaveClass('active');
+    expect(playlists).toHaveAttribute('aria-current', 'page');
   });
 
-  it('clicking a disabled entry fires NO network request + issues no nav', () => {
-    // If any handler fired it would surface as an unhandled-request error
-    // (onUnhandledRequest: 'error') and fail the spec. Spy to be explicit.
+  it('Playlists NavLink is also active on /playlists (index)', () => {
+    renderSidebarAt('/playlists');
+    const playlists = screen.getByRole('link', { name: /playlists/i });
+    expect(playlists).toHaveClass('active');
+  });
+
+  it('clicking the disabled Library entry fires NO network request + no nav', () => {
     const spy = vi.fn();
-    server.use(http.get('*/api/v1/playlists*', spy));
     server.use(http.get('*/api/v1/library*', spy));
-
-    renderSidebar();
-    const playlists = screen.getByRole('button', { name: /playlists/i });
-    playlists.click(); // disabled buttons don't fire click handlers, but assert
+    renderSidebarAt('/');
+    const library = screen.getByRole('button', { name: /library/i });
+    library.click(); // disabled buttons don't fire handlers, but assert honesty
     expect(spy).not.toHaveBeenCalled();
-    // The location is unchanged (still '/').
-    expect(window.location.pathname + window.location.hash).not.toMatch(
-      /playlists|library/,
-    );
   });
 });
