@@ -1,66 +1,46 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { ApiError } from '@/lib/api/http-client';
 import { render } from '@/test/render';
-import { server } from '@/test/msw/server';
-import { endpoints } from '@/lib/api/endpoints';
 import { AddTrackForm } from './AddTrackForm';
 
 /**
  * FE-PR3-04 — AddTrackForm molecule (REQ-FE-015).
  *
- * Track picker (simple UUID input for the demo) → `useAddTrack` mutation. The
- * form validates a non-empty trackId PRE-request (honest client gate), then
- * POSTs `{ trackId }`. Honest error surfacing:
- *  - 422 UNPROCESSABLE_ENTITY (unknown trackId) → "track not found"
- *  - 403 FORBIDDEN (non-owner) → "you are not the owner"
- *  - 201 success → the form resets; the parent's tracks-query invalidation
- *    (fired inside `useAddTrack.onSuccess`) appends the track on refetch.
+ * Presentational: the molecule owns the zod gate (non-empty trackId blocked
+ * PRE-submit) and honest error surfacing (422/403 message selection). The
+ * mutation is delegated to the parent via `onSubmit`, so the spec injects a
+ * `vi.fn()` — no MSW needed at this layer (the HTTP contract is covered by the
+ * hook spec + the page spec).
  */
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
-
 describe('AddTrackForm (REQ-FE-015)', () => {
-  it('blocks an empty trackId BEFORE any POST is issued', async () => {
-    const spy = vi.fn(() => HttpResponse.json({}, { status: 201 }));
-    server.use(http.post(endpoints.playlists.addTrack('P1'), spy));
-    render(<AddTrackForm playlistId="P1" />);
+  it('blocks an empty trackId BEFORE onSubmit is called', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AddTrackForm onSubmit={onSubmit} />);
     fireEvent.click(screen.getByRole('button', { name: /add track/i }));
     await waitFor(() =>
       expect(screen.getByText(/track id is required/i)).toBeInTheDocument(),
     );
-    expect(spy).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('on 201 it POSTs { trackId } and resets the input', async () => {
-    const spy = vi.fn(() =>
-      HttpResponse.json(
-        { position: 1, trackId: 'T9', addedAt: '2025-01-01T00:00:00.000Z' },
-        { status: 201 },
-      ),
-    );
-    server.use(http.post(endpoints.playlists.addTrack('P1'), spy));
-    render(<AddTrackForm playlistId="P1" />);
+  it('on success it calls onSubmit(trackId) and resets the input', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AddTrackForm onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText(/track id/i), {
       target: { value: 'T9' },
     });
     fireEvent.click(screen.getByRole('button', { name: /add track/i }));
-    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('T9'));
     // input reset after success
     expect(screen.getByLabelText(/track id/i)).toHaveValue('');
   });
 
-  it('surfaces a 422 (unknown trackId) honestly', async () => {
-    server.use(
-      http.post(endpoints.playlists.addTrack('P1'), () =>
-        HttpResponse.json(
-          { error: { code: 'UNPROCESSABLE_ENTITY', message: 'unknown track' } },
-          { status: 422 },
-        ),
-      ),
+  it('surfaces a 422 UNPROCESSABLE_ENTITY (unknown trackId) honestly', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(
+      new ApiError('UNPROCESSABLE_ENTITY', 'unknown track', 422),
     );
-    render(<AddTrackForm playlistId="P1" />);
+    render(<AddTrackForm onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText(/track id/i), {
       target: { value: 'T-NOPE' },
     });
@@ -70,16 +50,11 @@ describe('AddTrackForm (REQ-FE-015)', () => {
     );
   });
 
-  it('surfaces a 403 (non-owner) honestly', async () => {
-    server.use(
-      http.post(endpoints.playlists.addTrack('P1'), () =>
-        HttpResponse.json(
-          { error: { code: 'FORBIDDEN', message: 'not yours' } },
-          { status: 403 },
-        ),
-      ),
+  it('surfaces a 403 FORBIDDEN (non-owner) honestly', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(
+      new ApiError('FORBIDDEN', 'not yours', 403),
     );
-    render(<AddTrackForm playlistId="P1" />);
+    render(<AddTrackForm onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText(/track id/i), {
       target: { value: 'T9' },
     });
@@ -87,5 +62,11 @@ describe('AddTrackForm (REQ-FE-015)', () => {
     await waitFor(() =>
       expect(screen.getByText(/you are not the owner/i)).toBeInTheDocument(),
     );
+  });
+
+  it('disables the submit button while a submission is pending', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AddTrackForm onSubmit={onSubmit} isPending />);
+    expect(screen.getByRole('button', { name: /add track/i })).toBeDisabled();
   });
 });
