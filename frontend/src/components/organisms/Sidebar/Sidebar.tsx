@@ -5,11 +5,12 @@ import styles from './Sidebar.module.css';
 /**
  * Sidebar organism (REQ-FE-013, DESIGN §7).
  *
- * The protected navigation rail: Home + Search are REAL `NavLink`s (their
- * backend contexts exist in Slice A). Playlists + Library are HONEST disabled
- * placeholders — `<button disabled aria-disabled="true">` labelled "Coming
- * soon" — because their backend contexts are `.gitkeep`-only (Slice A scope).
- * No dead `<a href>` links, no fake features (REQ-FE-013).
+ * The protected navigation rail: Home + Search + Playlists are REAL `NavLink`s
+ * (their backend contexts exist now — Playlists graduated in PR-3, F5 closed).
+ * Library is still an HONEST disabled placeholder — `<button disabled
+ * aria-disabled="true">` labelled "Coming soon" — because its backend context
+ * (F6) is still `.gitkeep`-only. No dead `<a href>` links, no fake features
+ * (REQ-FE-013).
  */
 interface NavItem {
   kind: 'link';
@@ -26,14 +27,12 @@ interface StubItem {
 const PRIMARY: NavItem[] = [
   { kind: 'link', to: '/', label: 'Home', icon: 'home' },
   { kind: 'link', to: '/search', label: 'Search', icon: 'search' },
+  { kind: 'link', to: '/playlists', label: 'Playlists', icon: 'playlist' },
 ];
 
-// F5 (Playlists) + F6 (Library) backend contexts are absent in Slice A.
-// These are honest placeholders, not fake links (REQ-FE-013, CO-frontend-6).
-const STUBS: StubItem[] = [
-  { kind: 'stub', label: 'Playlists', icon: 'playlist' },
-  { kind: 'stub', label: 'Library', icon: 'library' },
-];
+// F6 (Library) backend context is still `.gitkeep`-only. This is an honest
+// placeholder, not a fake link (REQ-FE-013, CO-frontend-6).
+const STUBS: StubItem[] = [{ kind: 'stub', label: 'Library', icon: 'library' }];
 
 export function Sidebar() {
   return (
