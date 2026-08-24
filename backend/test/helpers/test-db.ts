@@ -65,8 +65,11 @@ export async function startTestDb(): Promise<TestDbContext> {
       // playlist_tracks.playlist_id -> playlists.id and the FK
       // playlist_tracks.track_id -> tracks.id (RESTRICT) require this order
       // even though the explicit CASCADE would handle it defensively.
+      //
+      // F6 (library): user_library_albums (junction) FIRST of all — before
+      // playlist_tracks and both of its parents (users, albums).
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "playlist_tracks", "playlists", "tracks", "albums", "artists", "refresh_tokens", "users" RESTART IDENTITY CASCADE;',
+        'TRUNCATE TABLE "user_library_albums", "playlist_tracks", "playlists", "tracks", "albums", "artists", "refresh_tokens", "users" RESTART IDENTITY CASCADE;',
       );
     },
     cleanup: async () => {

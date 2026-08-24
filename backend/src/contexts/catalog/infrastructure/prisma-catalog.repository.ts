@@ -91,6 +91,23 @@ export class PrismaCatalogRepository implements CatalogRepositoryPort {
     return rows.map(toTrack);
   }
 
+  async findAlbumByIds(ids: readonly string[]): Promise<AlbumSummary[]> {
+    // Port contract (REQ-L-005): empty input → no DB round-trip; missing IDs
+    // are silently skipped; result order is NOT guaranteed (caller sorts).
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.album.findMany({
+      where: { id: { in: [...ids] } },
+      include: { artist: true },
+    });
+    return rows.map((a) => ({
+      id: a.id,
+      title: a.title,
+      releaseYear: a.releaseYear,
+      coverUrl: a.coverUrl,
+      artist: { id: a.artist.id, name: a.artist.name },
+    }));
+  }
+
   async listArtists(input: ListInput): Promise<PaginatedResult<ArtistSummary>> {
     const [rows, total] = await Promise.all([
       this.prisma.artist.findMany({

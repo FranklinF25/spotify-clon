@@ -76,6 +76,19 @@ export class InMemoryCatalogRepository implements CatalogRepositoryPort {
     return this.tracks.filter((t) => idSet.has(t.id));
   }
 
+  async findAlbumByIds(ids: readonly string[]): Promise<AlbumSummary[]> {
+    // Port contract (REQ-L-005): empty input → no iteration; missing IDs are
+    // silently skipped; result order is NOT guaranteed. Deliberately returns
+    // in REVERSED insertion order so library use-case specs can assert the
+    // caller's defensive re-sort (F5's findTrackByIds-reversal trick).
+    if (ids.length === 0) return [];
+    const idSet = new Set(ids);
+    return this.albums
+      .filter((a) => idSet.has(a.id))
+      .reverse()
+      .map((a) => this.toAlbumSummary(a));
+  }
+
   async listArtists(input: ListInput): Promise<PaginatedResult<ArtistSummary>> {
     const total = this.artists.length;
     const skip = (input.page - 1) * input.pageSize;

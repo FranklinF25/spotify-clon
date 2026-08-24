@@ -222,6 +222,13 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
         name: 'RangeParserPort',
         path: 'contexts/playback/domain/ports/range-parser.port.ts',
       },
+      // Library driven port (F6 — design §11.3 item 1). No entity exists
+      // (design D1 — the join row IS the model), so this port-shape
+      // assertion is the structural contract for the whole domain layer.
+      {
+        name: 'LibraryRepositoryPort',
+        path: 'contexts/library/domain/ports/library-repository.port.ts',
+      },
     ] as const;
 
     for (const { name, path } of expected) {
@@ -353,6 +360,86 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
     const playlistsIdx = source.indexOf('"playlists"');
     expect(junctionIdx, 'playlist_tracks must be in the TRUNCATE').toBeGreaterThanOrEqual(0);
     expect(playlistsIdx, 'playlists must be in the TRUNCATE').toBeGreaterThan(junctionIdx);
+  });
+
+  it('test-db truncate covers user_library_albums junction-first (F6 — design §11.3 item 2)', () => {
+    const testDbPath = resolve(process.cwd(), 'test/helpers/test-db.ts');
+    expect(existsSync(testDbPath), 'test/helpers/test-db.ts must exist').toBe(true);
+    const source = readFileSync(testDbPath, 'utf8');
+
+    // user_library_albums (junction) BEFORE playlist_tracks AND both of its
+    // parents (users, albums) — the FKs user_library_albums.user_id ->
+    // users.id and user_library_albums.album_id -> albums.id (both CASCADE)
+    // require this order defensively, mirroring the F5 junction-first rule.
+    expect(
+      source,
+      'truncate must include "user_library_albums" so library tests start clean',
+    ).toContain('"user_library_albums"');
+
+    const truncateStmt = source.slice(source.indexOf('TRUNCATE TABLE'));
+    const junctionIdx = truncateStmt.indexOf('"user_library_albums"');
+    expect(junctionIdx, 'user_library_albums must be in the TRUNCATE').toBeGreaterThanOrEqual(0);
+    for (const parent of ['"playlist_tracks"', '"users"', '"albums"']) {
+      const parentIdx = truncateStmt.indexOf(parent);
+      expect(parentIdx, `${parent} must be in the TRUNCATE`).toBeGreaterThan(junctionIdx);
+    }
+  });
+
+  it('requires LibraryRepositoryPort to be a framework-free interface under domain/ports (F6 — design §11.3 item 1)', () => {
+    const portPath = 'contexts/library/domain/ports/library-repository.port.ts';
+    const absolute = resolve(srcRoot, portPath);
+    expect(existsSync(absolute), `expected port file ${portPath}`).toBe(true);
+
+    const source = loadSourceFile(absolute);
+
+    const interfaceNames = source.getInterfaces().map((i) => i.getName());
+    expect(
+      interfaceNames,
+      'LibraryRepositoryPort must be declared as an interface',
+    ).toContain('LibraryRepositoryPort');
+
+    const classesNamedPort = source
+      .getClasses()
+      .map((c) => c.getName())
+      .filter((n): n is string => Boolean(n) && n === 'LibraryRepositoryPort');
+    expect(classesNamedPort, 'LibraryRepositoryPort must not be a class').toEqual([]);
+
+    // Framework-free (mirrors the playlists port-shape assertion): pure TS
+    // interface, zero NestJS / Prisma / express / rxjs / pino imports.
+    const forbidden = ['@prisma/client', '@nestjs/common', '@nestjs/core', 'prisma', 'express', 'rxjs', 'pino'];
+    for (const declaration of source.getImportDeclarations()) {
+      const specifier = declaration.getModuleSpecifierValue();
+      for (const banned of forbidden) {
+        expect(
+          specifier,
+          `LibraryRepositoryPort must not import "${banned}" (pure TS interface, framework-free)`,
+        ).not.toContain(banned);
+      }
+    }
+  });
+
+  it('forbids library code from importing the playlists context (F6 — REQ-L-007 isolation scan)', () => {
+    // REQ-L-007: the library context MUST NOT read, aggregate, or depend on
+    // the playlists context — the unified view is composed client-side.
+    // Scans every production source under contexts/library/ for relative
+    // imports resolving into contexts/playlists/ (trivially green while the
+    // context is empty; guards from now on).
+    const offenders: string[] = [];
+    for (const file of contextFiles) {
+      const rel = relOf(file);
+      if (rel.split('/')[1] !== 'library') continue;
+      const source = loadSourceFile(file);
+      for (const declaration of source.getImportDeclarations()) {
+        const specifier = declaration.getModuleSpecifierValue();
+        if (!specifier.startsWith('.')) continue;
+        const resolved = resolve(dirname(file), specifier);
+        const target = posix(relative(srcRoot, resolved));
+        if (target.split('/')[1] === 'playlists') {
+          offenders.push(rel + ' imports "' + specifier + '" (crosses into playlists)');
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('requires Playlist entity to expose static create/reconstruct + instance rename/ensureOwnedBy (F5 — design §14.5)', () => {
