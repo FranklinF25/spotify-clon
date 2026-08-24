@@ -442,6 +442,33 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('library controller declares only library/albums routes (F6 — REQ-L-007 route-surface scan, design §11.3 item 3b)', () => {
+    // REQ-L-007 "No library endpoint aggregates playlists" as a STRUCTURAL
+    // guarantee: the controller's declared route strings must be exactly the
+    // three library surfaces — GET 'library/albums' + the POST/DELETE
+    // 'library/albums/:albumId' pair. Any playlists (or other-context) route
+    // string here fails the scan.
+    const controllerPath = 'contexts/library/infrastructure/library.controller.ts';
+    const absolute = resolve(srcRoot, controllerPath);
+    expect(existsSync(absolute), `expected controller file ${controllerPath}`).toBe(true);
+
+    const source = readFileSync(absolute, 'utf8');
+    const routeStrings = [...source.matchAll(/@(Get|Post|Patch|Put|Delete)\('([^']+)'\)/g)].map(
+      (m) => m[2],
+    );
+
+    expect(routeStrings.sort(), 'the controller must declare exactly the three library routes').toEqual(
+      ['library/albums', 'library/albums/:albumId', 'library/albums/:albumId'],
+    );
+
+    // Belt-and-braces: no route string may reference another context.
+    for (const route of routeStrings) {
+      expect(route, `route "${route}" must be library-scoped (REQ-L-007)`).toMatch(
+        /^library\/albums(\/:albumId)?$/,
+      );
+    }
+  });
+
   it('requires Playlist entity to expose static create/reconstruct + instance rename/ensureOwnedBy (F5 — design §14.5)', () => {
     const playlistPath = 'contexts/playlists/domain/playlist.entity.ts';
     const absolute = resolve(srcRoot, playlistPath);
