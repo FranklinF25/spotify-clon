@@ -24,6 +24,7 @@ model User {
 
   refreshTokens RefreshToken[]
   playlists     Playlist[]
+  libraryAlbums UserLibraryAlbum[]
 
   @@map("users")
 }
@@ -75,6 +76,7 @@ model Album {
 
   artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
   tracks Track[]
+  libraryAlbums UserLibraryAlbum[]
 
   titleTsv Unsupported("tsvector")? @map("title_tsv")
 
@@ -148,4 +150,28 @@ model PlaylistTrack {
   @@id([playlistId, position])
   @@index([trackId])
   @@map("playlist_tracks")
+}
+
+/// Saved-album junction (F6 — library context). "Tabla de unión, no una
+/// entidad" (DESIGN §2.3): no rich aggregate — the row IS the model. Composite
+/// PK (user_id, album_id) = at most one row per user per album (REQ-L-006).
+/// added_at is reset by the upsert on re-save (LOCKED decision #3). Both FKs
+/// CASCADE: deleting a user OR an album removes saved rows (REQ-L-006).
+///
+/// Plain `@@id` — NOT deferrable (design D2): unlike playlist_tracks (whose
+/// reorder UPDATE-CASE needs deferred uniqueness checking), library's only
+/// writer is a row-at-a-time upsert that can never transiently violate its
+/// own target pair. The typed `userId_albumId` compound-unique input falls
+/// out of `@@id` for free, which the upsert needs (F5 R-app-1 lesson).
+model UserLibraryAlbum {
+  userId  String   @map("user_id") @db.Uuid
+  albumId String   @map("album_id") @db.Uuid
+  addedAt DateTime @default(now()) @map("added_at") @db.Timestamptz
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@id([userId, albumId])
+  @@index([albumId])
+  @@map("user_library_albums")
 }
