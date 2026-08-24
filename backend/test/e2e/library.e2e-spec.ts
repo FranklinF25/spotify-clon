@@ -140,4 +140,146 @@ describe('Library HTTP API (e2e)', () => {
       expect(res.body.error.code).toBe('UNPROCESSABLE_ENTITY');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // REQ-L-003 — List Saved Albums (Hydrated, Recency, Isolated)
+  // -------------------------------------------------------------------------
+
+  describe('REQ-L-003 — List saved albums (hydrated, recency, isolated)', () => {
+    it('Returns hydrated albums most-recent-first when saved in order [A1, A2, A3]', async () => {
+      const u1 = ctx.tokens.U1.token;
+      for (const id of [A1, A2, A3]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/library/albums/${id}`)
+          .set('Authorization', `Bearer ${u1}`);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      const res = await request(ctx.app.getHttpServer())
+        .get('/api/v1/library/albums')
+        .set('Authorization', `Bearer ${u1}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.map((e: { album: { id: string } }) => e.album.id)).toEqual([A3, A2, A1]);
+      // Hydrated projection: album nest carries the catalog summary fields.
+      expect(res.body[0].album).toMatchObject({
+        id: A3,
+        title: 'Library Test Album A3',
+        artist: { id: expect.any(String), name: 'Library Test Artist' },
+      });
+      expect(res.body[0].addedAt).toEqual(expect.any(String));
+    });
+
+    it("Another user's saves are invisible (user-scoped isolation)", async () => {
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/library/albums/${A1}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`);
+
+      const u1List = await request(ctx.app.getHttpServer())
+        .get('/api/v1/library/albums')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(u1List.status).toBe(200);
+      expect(u1List.body).toEqual([]);
+    });
+
+    it('A broken album reference is silently omitted (album deleted out-of-band → survivors only, no error)', async () => {
+      const u1 = ctx.tokens.U1.token;
+      for (const id of [A1, A2, A3]) {
+        await request(ctx.app.getHttpServer())
+          .post(`/api/v1/library/albums/${id}`)
+          .set('Authorization', `Bearer ${u1}`);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      // Out-of-band catalog delete — the junction row cascades away.
+      await prisma.album.delete({ where: { id: A2 } });
+
+      const res = await request(ctx.app.getHttpServer())
+        .get('/api/v1/library/albums')
+        .set('Authorization', `Bearer ${u1}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.map((e: { album: { id: string } }) => e.album.id)).toEqual([A3, A1]);
+
+      // Restore the catalog row — albums survive beforeEach truncation, so
+      // the out-of-band delete is otherwise permanent for this container
+      // and pollutes every later save of A2.
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "albums" ("id", "title", "release_year", "cover_url", "artist_id")
+         VALUES ('${A2}'::uuid, 'Library Test Album A2', 2002, NULL,
+                 '00000000-0000-0000-0000-0000000000c1'::uuid)`,
+      );
+    });
+
+    it('A user with no saves gets 200 and an empty array', async () => {
+      const res = await request(ctx.app.getHttpServer())
+        .get('/api/v1/library/albums')
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // REQ-L-004 — Remove Album from Library (Idempotent)
+  // -------------------------------------------------------------------------
+
+  describe('REQ-L-004 — Remove album from library (idempotent)', () => {
+    it('Removing a saved album returns 204 AND the subsequent GET lists survivors only', async () => {
+      const u1 = ctx.tokens.U1.token;
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/library/albums/${A1}`)
+        .set('Authorization', `Bearer ${u1}`);
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/library/albums/${A2}`)
+        .set('Authorization', `Bearer ${u1}`);
+
+      const del = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/library/albums/${A1}`)
+        .set('Authorization', `Bearer ${u1}`);
+
+      expect(del.status).toBe(204);
+      expect(del.body).toEqual({});
+
+      const list = await request(ctx.app.getHttpServer())
+        .get('/api/v1/library/albums')
+        .set('Authorization', `Bearer ${u1}`);
+
+      expect(list.status).toBe(200);
+      expect(list.body.map((e: { album: { id: string } }) => e.album.id)).toEqual([A2]);
+    });
+
+    it('Removing a never-saved but existing album returns 204 AND writes no row', async () => {
+      const del = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/library/albums/${A9}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(del.status).toBe(204);
+      expect(del.body).toEqual({});
+      expect(await prisma.userLibraryAlbum.count()).toBe(0);
+    });
+
+    it("U1 removing a shared album leaves U2's save intact (cross-user isolation)", async () => {
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/library/albums/${A1}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+      await request(ctx.app.getHttpServer())
+        .post(`/api/v1/library/albums/${A1}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`);
+
+      const del = await request(ctx.app.getHttpServer())
+        .delete(`/api/v1/library/albums/${A1}`)
+        .set('Authorization', `Bearer ${ctx.tokens.U1.token}`);
+
+      expect(del.status).toBe(204);
+
+      const u2List = await request(ctx.app.getHttpServer())
+        .get('/api/v1/library/albums')
+        .set('Authorization', `Bearer ${ctx.tokens.U2.token}`);
+
+      expect(u2List.status).toBe(200);
+      expect(u2List.body.map((e: { album: { id: string } }) => e.album.id)).toEqual([A1]);
+    });
+  });
 });
