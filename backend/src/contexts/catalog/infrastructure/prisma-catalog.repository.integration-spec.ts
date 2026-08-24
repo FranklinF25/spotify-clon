@@ -178,6 +178,40 @@ describe('PrismaCatalogRepository', () => {
     });
   });
 
+  describe('findAlbumByIds', () => {
+    it('returns only the albums that exist (missing IDs silently skipped, no placeholder entries)', async () => {
+      // REQ-L-005 "Batch lookup returns only the existing subset": a request
+      // for [A1, A2, nope] resolves to exactly the A1 + A2 summaries.
+      const artist = await seedArtist('Artist One');
+      const a1 = await seedAlbum(artist.id, 'Album One');
+      const a2 = await seedAlbum(artist.id, 'Album Two');
+
+      const result: AlbumSummary[] = await repo.findAlbumByIds([
+        a1.id,
+        a2.id,
+        '00000000-0000-0000-0000-000000000000',
+      ]);
+
+      expect(result).toHaveLength(2);
+      const titles = result.map((a) => a.title).sort();
+      expect(titles).toEqual(['Album One', 'Album Two']);
+      for (const album of result) {
+        expect(album.artist.id).toBe(artist.id);
+        expect(album.artist.name).toBe('Artist One');
+      }
+      // No placeholder/null entry for the unknown id — found-only contract.
+      expect(result.every((a) => Boolean(a.id) && a.id !== '00000000-0000-0000-0000-000000000000')).toBe(true);
+    });
+
+    it('returns [] immediately when ids is empty (port contract: no DB round-trip)', async () => {
+      // Behavioral mirror of the findTrackByIds empty-short-circuit guard:
+      // the adapter returns [] before reaching prisma.album.findMany.
+      const result = await repo.findAlbumByIds([]);
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('listArtists', () => {
     it('paginates with accurate total + page + pageSize', async () => {
       for (let i = 0; i < 7; i++) {
