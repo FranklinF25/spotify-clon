@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { Route, Routes } from 'react-router-dom';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
