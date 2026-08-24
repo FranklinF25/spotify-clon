@@ -36,6 +36,8 @@ export interface SearchInput {
  *   - `catalog` use cases (this change)
  *   - `playback` (future change) — `findTrackById` for single-track streaming
  *     and `findTrackByIds` for queue resolution.
+ *   - `library` (F6) — `findAlbumByIds` for saved-album hydration and the
+ *     add-album existence check.
  *
  * ┌──────────────────────────────────────────────────────────────────────────┐
  * │ EVOLUTION RULES (JD learning #6 — additive vs mutating)                  │
@@ -96,6 +98,21 @@ export interface CatalogRepositoryPort {
    *     that need a specific order MUST sort client-side.
    */
   findTrackByIds(ids: readonly string[]): Promise<Track[]>;
+
+  /**
+   * Resolve multiple album summaries by ID in a single round-trip (F6 — REQ-L-005).
+   *
+   * Contract (locked — mirrors `findTrackByIds`, consumed by `library`):
+   *   - Empty `ids` returns `[]` WITHOUT a DB round-trip.
+   *   - Missing IDs are silently skipped — only the FOUND subset is returned,
+   *     one entry per existing id, NO placeholder/null entries (REQ-L-005
+   *     scenario "Batch lookup returns only the existing subset").
+   *   - Result length MAY be less than `ids.length`.
+   *   - Order of results is NOT guaranteed to match input order — callers
+   *     that need a specific order MUST sort client-side (REQ-L-005 scenario
+   *     "Result order is not guaranteed").
+   */
+  findAlbumByIds(ids: readonly string[]): Promise<AlbumSummary[]>;
 
   /** Offset-paginated artist summaries for `GET /artists`. */
   listArtists(input: ListInput): Promise<PaginatedResult<ArtistSummary>>;
