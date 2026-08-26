@@ -8,7 +8,7 @@ import {
   vi,
 } from 'vitest';
 import type { ReactNode } from 'react';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { server } from '@/test/msw/server';
 import { render } from '@/test/render';
@@ -331,6 +331,62 @@ describe('PlayerBar — el.play() rejection surface (JD fix #14 + R2-11)', () =>
     await waitFor(() =>
       expect(usePlayerStore.getState().isPlaying).toBe(true),
     );
+    playSpy.mockRestore();
+  });
+
+  // Play-race regression 1: the pending-play abort. In a real browser,
+  // el.play() with NO source pends forever; assigning el.src (the blob
+  // URL arriving) rejects that pending promise with AbortError. That abort
+  // is the track-change path and MUST NOT pause the store or surface the
+  // overlay — only genuine failures (NotAllowedError et al.) do.
+  it('AbortError from play() is NOT surfaced (no pause, no overlay)', async () => {
+    useAuthStore.setState({ accessToken: 'T' });
+    withQueue(trackA);
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockRejectedValue(new DOMException('aborted', 'AbortError'));
+
+    render(
+      <Provider>
+        <PlayerBar />
+      </Provider>,
+    );
+    await waitFor(() => expect(audio().src).toMatch(/^blob:/));
+    usePlayerStore.getState().play();
+    await waitFor(() => expect(playSpy).toHaveBeenCalled());
+    // Give the microtask queue a beat to run any (wrong) catch handler.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+    expect(
+      screen.queryByRole('button', { name: /tap to play/i }),
+    ).not.toBeInTheDocument();
+    playSpy.mockRestore();
+  });
+
+  // Play-race regression 2: play() MUST NOT be called while no source is
+  // attached. Without the blob (no access token), src stays '' — a play()
+  // there pends forever and then AbortErrors when the blob arrives.
+  it('isPlaying=true with no source does NOT call el.play()', async () => {
+    useAuthStore.setState({ accessToken: null }); // no token → no blob URL
+    withQueue(trackA);
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockResolvedValue(undefined);
+
+    render(
+      <Provider>
+        <PlayerBar />
+      </Provider>,
+    );
+    await act(async () => {
+      usePlayerStore.getState().play();
+      await Promise.resolve();
+    });
+    expect(playSpy).not.toHaveBeenCalled();
+    // The store intent is preserved — the [src] effect owns the start.
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
     playSpy.mockRestore();
   });
 });

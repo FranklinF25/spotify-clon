@@ -38,6 +38,11 @@ import styles from './PlayerBar.module.css';
 export function PlayerBar() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const src = useAudioSource();
+  // Last source WE assigned to the element (null until a blob URL exists).
+  // Guard for the [isPlaying] effect: `el.src` is useless as a "has source?"
+  // probe because assigning '' resolves against the document URL (truthy in
+  // every browser). This ref tracks the real assignment (play-race fix).
+  const assignedSrcRef = useRef<string | null>(null);
 
   // Scrubbing flag — set on SeekBar pointer-down, cleared on commit. While
   // scrubbing, onTimeUpdate skips its write so the element's playhead does
@@ -72,18 +77,30 @@ export function PlayerBar() {
   // back to false + surface TapToPlayOverlay. The `unmounted` flag guards
   // the async setPlayBlocked call so a rejection that fires after unmount
   // does not setState on an unmounted component (R2-11).
+  //
+  // AbortError is BENIGN and intentionally NOT surfaced (play-race fix):
+  // assigning `el.src` runs the media load algorithm, which REJECTS any
+  // still-pending play promise with AbortError (HTML spec — resource
+  // selection). That is the track-change path, not a playback failure;
+  // this effect's own `play()` call (when isPlaying) owns the new track.
+  // Surfacing it flipped the store to paused + showed the overlay on
+  // every first play in real browsers (jsdom never reproduces this: its
+  // play() stub resolves immediately, so the pending-abort semantics
+  // never engage).
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
     let unmounted = false;
+    assignedSrcRef.current = src ?? null;
     el.src = src ?? '';
     if (src && isPlaying) {
       // `Promise.resolve(el.play())` defensive shape: some environments
       // (jsdom) return undefined from play(); wrapping normalises it so the
       // rejection surface is always wired. In real browsers el.play() is a
       // Promise and this is a no-op wrap.
-      Promise.resolve(el.play()).catch(() => {
+      Promise.resolve(el.play()).catch((err: unknown) => {
         if (unmounted) return; // R2-11: don't setState post-unmount
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         usePlayerStore.getState().pause(); // keep the store honest
         setPlayBlocked(true); // surface a tap-to-play recovery affordance
       });
@@ -95,16 +112,27 @@ export function PlayerBar() {
   }, [src]);
 
   // store → element: play/pause
+  //
+  // No-source guard (play-race fix): calling `el.play()` before any source
+  // is attached pends FOREVER (the promise only settles once the resource
+  // selection algorithm runs) and is then rejected with AbortError when the
+  // blob URL arrives — the [src] effect reassigns `el.src`, which aborts
+  // the pending promise. Skipping the call while `assignedSrcRef` is null
+  // leaves playback start to the [src] effect, which runs `play()` exactly
+  // when the source exists AND isPlaying is true.
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
     let unmounted = false; // R2-11: same unmount guard
     if (isPlaying) {
-      Promise.resolve(el.play()).catch(() => {
-        if (unmounted) return;
-        usePlayerStore.getState().pause();
-        setPlayBlocked(true);
-      });
+      if (assignedSrcRef.current) {
+        Promise.resolve(el.play()).catch((err: unknown) => {
+          if (unmounted) return;
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          usePlayerStore.getState().pause();
+          setPlayBlocked(true);
+        });
+      }
     } else {
       el.pause();
     }
