@@ -58,3 +58,6 @@ coverage/
 
 # Agent / tooling metadata (not part of the product)
 .atl/
+
+# CodeGraph local index
+codegraph/
