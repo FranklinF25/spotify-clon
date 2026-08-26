@@ -9,6 +9,8 @@ import { GetTrackUseCase } from '../application/get-track.use-case';
 import { ListAlbumsUseCase } from '../application/list-albums.use-case';
 import { ListArtistsUseCase } from '../application/list-artists.use-case';
 import { SearchCatalogUseCase } from '../application/search-catalog.use-case';
+import { UploadTrackUseCase } from '../application/upload-track.use-case';
+import { ValidationError } from '../../../shared/errors/validation-error';
 import { CatalogController } from './catalog.controller';
 import * as validatePaginationModule from './dto/validate-pagination';
 import * as validateSearchModule from './dto/validate-search';
@@ -38,6 +40,7 @@ describe('CatalogController', () => {
     getAlbum?: Partial<GetAlbumUseCase>;
     getTrack?: Partial<GetTrackUseCase>;
     search?: Partial<SearchCatalogUseCase>;
+    upload?: Partial<UploadTrackUseCase>;
   } = {}) {
     const listArtists = { execute: vi.fn() } as unknown as ListArtistsUseCase;
     const getArtist = { execute: vi.fn() } as unknown as GetArtistUseCase;
@@ -45,9 +48,10 @@ describe('CatalogController', () => {
     const getAlbum = { execute: vi.fn() } as unknown as GetAlbumUseCase;
     const getTrack = { execute: vi.fn() } as unknown as GetTrackUseCase;
     const search = { execute: vi.fn() } as unknown as SearchCatalogUseCase;
+    const upload = { execute: vi.fn() } as unknown as UploadTrackUseCase;
     return {
-      controller: new CatalogController(listArtists, getArtist, listAlbums, getAlbum, getTrack, search),
-      mocks: { listArtists, getArtist, listAlbums, getAlbum, getTrack, search },
+      controller: new CatalogController(listArtists, getArtist, listAlbums, getAlbum, getTrack, search, upload),
+      mocks: { listArtists, getArtist, listAlbums, getAlbum, getTrack, search, upload },
     };
   }
 
@@ -300,6 +304,67 @@ describe('CatalogController', () => {
         type: 'artist',
       });
       spy.mockRestore();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /tracks/upload (REQ-UPLOAD-001 … REQ-UPLOAD-003).
+  //
+  // The multipart validation MATRIX splits by responsibility:
+  //  - NO FILE (missing part / non-multipart body) → handler branch below;
+  //  - WRONG EXTENSION → `UPLOAD_FILE_OPTIONS.fileFilter` (allowlist);
+  //  - OVERSIZE → `UploadFileExceptionFilter` (multer LIMIT_FILE_SIZE map).
+  // The last two run inside the interceptor/filter pipeline, so their unit
+  // specs live next to those artifacts; the e2e spec drives all three over
+  // real HTTP.
+  // -------------------------------------------------------------------------
+  describe('POST /tracks/upload', () => {
+    it('throws VALIDATION_ERROR (field "file") when no file part is present', async () => {
+      const { controller, mocks } = buildController();
+
+      // undefined — no multipart body at all (interceptor skipped parsing).
+      await expect(controller.upload(undefined)).rejects.toBeInstanceOf(ValidationError);
+      await expect(controller.upload(undefined)).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        status: 400,
+        details: [{ field: 'file', issue: expect.stringContaining('multipart/form-data') }],
+      });
+
+      // The use case must never see a fileless request.
+      expect(mocks.upload.execute).not.toHaveBeenCalled();
+    });
+
+    it('forwards originalFilename + bytes to UploadTrackUseCase and returns the 201 contract', async () => {
+      const { controller, mocks } = buildController();
+      const bytes = Buffer.from('fake-mp3-bytes');
+      mocks.upload.execute.mockResolvedValue({
+        track: { id: 't1', title: 'Song', durationSeconds: 42, albumId: 'l1' },
+        artist: { id: 'a1', name: 'Artist One' },
+        album: { id: 'l1', title: 'Singles' },
+      });
+
+      const result = await controller.upload({
+        fieldname: 'file',
+        originalname: 'Artist One - Song.mp3',
+        encoding: '7bit',
+        mimetype: 'audio/mpeg',
+        buffer: bytes,
+        size: bytes.length,
+      } as Express.Multer.File);
+
+      expect(mocks.upload.execute).toHaveBeenCalledWith({
+        originalFilename: 'Artist One - Song.mp3',
+        bytes,
+      });
+      // EXACT response contract (REQ-UPLOAD-001) — nothing more.
+      expect(result).toEqual({
+        track: { id: 't1', title: 'Song', durationSeconds: 42, albumId: 'l1' },
+        artist: { id: 'a1', name: 'Artist One' },
+        album: { id: 'l1', title: 'Singles' },
+      });
+      expect(Object.keys(result).sort()).toEqual(['album', 'artist', 'track']);
+      // R4 guard: no storage path anywhere in the upload response.
+      expect(JSON.stringify(result)).not.toContain('filePath');
     });
   });
 });

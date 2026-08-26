@@ -1,11 +1,33 @@
-import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
 import { PrismaClient } from '@prisma/client';
 import { parseFile } from 'music-metadata';
 
+import {
+  type AudioFileMeta,
+  deriveDeterministicId,
+  isAudioFile,
+  resolveTrackMeta,
+} from '../src/shared/audio-meta';
 import { loadConfig } from '../src/config';
+
+// Re-export the shared derivation kernel VERBATIM (single source of truth —
+// the upload use case derives ids/meta with the exact same helpers so an
+// upload followed by a re-seed converges on the same rows instead of
+// duplicating). `seed.spec.ts` keeps importing these from `./seed`.
+export {
+  AUDIO_EXTENSIONS,
+  FALLBACK_ALBUM_TITLE,
+  FALLBACK_ARTIST_NAME,
+  type AudioFileMeta,
+  deriveDeterministicId,
+  isAudioFile,
+  parseArtistTitleFromFilename,
+  resolveDurationSeconds,
+  resolveTrackMeta,
+  resolveYear,
+} from '../src/shared/audio-meta';
 
 /**
  * Filesystem-scanning catalog seeder (replaces the synthetic PRNG dataset).
@@ -31,7 +53,8 @@ import { loadConfig } from '../src/config';
  * in `scripts/seed-with-guard.sh` was removed — warm restarts now re-run the
  * seed as a sync, never skipping (REQ-DOCKER-005 semantics updated).
  *
- * Fallbacks when tags are missing (all pure + exported for the spec):
+ * Fallbacks when tags are missing (all pure + re-exported from
+ * `src/shared/audio-meta.ts` for the spec):
  *   - artist/title: filename split on the FIRST ` - ` (artist ← left side,
  *     title ← right side without extension); no separator → title = stem,
  *     artist = `'Unknown Artist'`.
@@ -41,6 +64,12 @@ import { loadConfig } from '../src/config';
  *   - `file_path` is stored as `/audio/{relativePath}` so it matches the
  *     `FsAudioStorage.resolve` contract (leading slash stripped, joined under
  *     AUDIO_STORAGE_PATH — see src/config.ts C8 note).
+ *
+ * The pure derivation helpers (fallbacks, id digest, meta resolution,
+ * extension allowlist) live in `src/shared/audio-meta.ts` and are
+ * re-exported below — the upload use case derives ids/meta with the SAME
+ * helpers, so an upload followed by a re-seed converges on the same rows
+ * instead of duplicating them.
  *
  * Empty or missing audio directory → clear warning + NO-OP: the seeder must
  * never wipe an existing catalog just because the mount is empty.
@@ -55,22 +84,6 @@ import { loadConfig } from '../src/config';
  * directly (mocking `parseFile` at this module boundary — no real audio
  * files needed) and target a testcontainer without spawning a child process.
  */
-
-/** Accepted audio extensions (case-insensitive, compared lowercased). */
-export const AUDIO_EXTENSIONS = ['.mp3', '.flac', '.ogg', '.m4a', '.wav', '.opus'] as const;
-
-/** Filename-fallback artist when no ` - ` separator (or no artist tag). */
-export const FALLBACK_ARTIST_NAME = 'Unknown Artist';
-
-/** Album fallback — the flat `Artist - Title.ext` layout has no album context. */
-export const FALLBACK_ALBUM_TITLE = 'Singles';
-
-/**
- * Duration floor. `duration_seconds` feeds the SPA progress bar (divide by
- * total); 0 would produce Infinity/NaN progress. 1s is the sane floor for a
- * truly unparsable file.
- */
-const MIN_DURATION_SECONDS = 1;
 
 /** Shape of every catalog row that the snapshot spec compares against. */
 export interface SeedSnapshot {
@@ -92,135 +105,11 @@ export interface SeedSnapshot {
   }>;
 }
 
-/** Tag-derived + fallback-resolved metadata for ONE scanned audio file. */
-export interface AudioFileMeta {
-  artist: string;
-  album: string;
-  title: string;
-  year: number | null;
-  trackNo: number | null;
-  durationSeconds: number;
-}
-
 /** One accepted file under the audio root, with its resolved metadata. */
 export interface ScannedAudioFile {
   /** Path relative to the audio root, POSIX separators (e.g. `Artist - Title.flac`). */
   relativePath: string;
   meta: AudioFileMeta;
-}
-
-/** True when the filename carries an accepted audio extension (case-insensitive). */
-export function isAudioFile(fileName: string): boolean {
-  const ext = path.extname(fileName).toLowerCase();
-  return (AUDIO_EXTENSIONS as readonly string[]).includes(ext);
-}
-
-/**
- * Filename fallback: split `Artist - Title.ext` on the FIRST ` - `.
- *
- * Artist ← left of the first separator, title ← right side WITHOUT the
- * extension. Files without a separator become title-only (artist falls back
- * to `Unknown Artist`). Splits on the FIRST separator only, so titles that
- * themselves contain ` - ` (`A - B - C.flac` → artist `A`, title `B - C`)
- * survive intact.
- */
-export function parseArtistTitleFromFilename(fileName: string): {
-  artist: string;
-  title: string;
-} {
-  const stem = path.basename(fileName, path.extname(fileName));
-  const separator = stem.indexOf(' - ');
-  const artist = (separator === -1 ? '' : stem.slice(0, separator)).trim();
-  const title = (separator === -1 ? stem : stem.slice(separator + 3)).trim();
-  return {
-    artist: artist || FALLBACK_ARTIST_NAME,
-    title: title || stem.trim() || fileName,
-  };
-}
-
-/**
- * Duration resolution: `Math.round(format.duration)` when present and
- * positive; the 1s floor otherwise. 0 is NOT acceptable (SPA progress math).
- */
-export function resolveDurationSeconds(duration: number | undefined): number {
-  if (typeof duration === 'number' && Number.isFinite(duration) && duration > 0) {
-    return Math.max(MIN_DURATION_SECONDS, Math.round(duration));
-  }
-  return MIN_DURATION_SECONDS;
-}
-
-/**
- * Release-year resolution: prefer `common.year`; fall back to the first
- * 4-digit run in `common.date` (e.g. `2019-08-09` → 2019); null when neither
- * yields a plausible positive year.
- */
-export function resolveYear(year?: number, date?: string): number | null {
-  if (typeof year === 'number' && Number.isFinite(year) && year > 0) {
-    return Math.round(year);
-  }
-  if (typeof date === 'string') {
-    const match = /(\d{4})/.exec(date);
-    if (match) {
-      const parsed = Number.parseInt(match[1]!, 10);
-      if (Number.isFinite(parsed) && parsed > 0) return parsed;
-    }
-  }
-  return null;
-}
-
-/**
- * Deterministic RFC 4122 v5-style UUID from the SHA-256 of a stable key.
- *
- * Same construction as a real v5 UUID (namespace-less: the key itself
- * carries the `artist:` / `album:` / `track:` namespace prefix), digesting
- * with SHA-256 instead of v5's SHA-1 and taking the first 16 bytes. Version nibble
- * is forced to `0101` (5) and the variant nibble to `10xx` per RFC 4122 —
- * same byte surgery the old PRNG v4 helper did, different digest source.
- * Equal key ⇒ equal UUID ⇒ idempotent re-seeds.
- */
-export function deriveDeterministicId(key: string): string {
-  const digest = createHash('sha256').update(key, 'utf8').digest();
-  const bytes = digest.subarray(0, 16);
-  // Version (top nibble of byte 6) = 5.
-  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
-  // Variant (top two bits of byte 8) = 10.
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
-
-/**
- * Merge parsed tags with the filename/constant fallbacks into the final
- * per-file metadata. Pure — the spec exercises every fallback branch here
- * without touching a real audio file.
- */
-export function resolveTrackMeta(
-  relativePath: string,
-  tags: {
-    artist?: string;
-    album?: string;
-    title?: string;
-    year?: number;
-    date?: string;
-    trackNo?: number | null;
-    duration?: number;
-  },
-): AudioFileMeta {
-  const fileName = relativePath.split('/').pop() ?? relativePath;
-  const fallback = parseArtistTitleFromFilename(fileName);
-  const cleanTag = (value: string | undefined): string =>
-    typeof value === 'string' ? value.trim() : '';
-  const hasTrackNo =
-    typeof tags.trackNo === 'number' && Number.isInteger(tags.trackNo) && tags.trackNo > 0;
-
-  return {
-    artist: cleanTag(tags.artist) || fallback.artist,
-    album: cleanTag(tags.album) || FALLBACK_ALBUM_TITLE,
-    title: cleanTag(tags.title) || fallback.title,
-    year: resolveYear(tags.year, tags.date),
-    trackNo: hasTrackNo ? (tags.trackNo as number) : null,
-    durationSeconds: resolveDurationSeconds(tags.duration),
-  };
 }
 
 /**

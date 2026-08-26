@@ -56,7 +56,12 @@ services:
       JWT_ACCESS_SECRET: "demo-access-secret-do-not-use-32-chars-min!!"
       JWT_REFRESH_SECRET: "demo-refresh-secret-do-not-use-32-chars-min!!"
     volumes:
-      - ./audio:/data/audio:ro           # read-only host mount (REQ-DOCKER-006)
+      # WRITABLE host mount (REQ-UPLOAD-001 — updated from the original
+      # REQ-DOCKER-006 read-only mount): POST /api/v1/tracks/upload persists
+      # user-uploaded files into this tree via FsAudioFileWriter, so the
+      # backend needs write access. The seed service below keeps its own
+      # :ro view (it only scans) and is unaffected.
+      - ./audio:/data/audio:rw
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -78,9 +83,10 @@ services:
     # seed.ts calls loadConfig() → validates the FULL env schema, so the seed
     # container needs the SAME env map as backend (incl. JWT_*, AUDIO_STORAGE_PATH).
     environment: *backend-env
-    # Same read-only host mount as backend (REQ-DOCKER-006): the seeder scans
-    # <AUDIO_STORAGE_PATH>/audio = /data/audio to build the catalog from the
-    # real library. Without the mount the scan no-ops (warn + leave DB as-is).
+    # Same host mount as backend but READ-ONLY (REQ-DOCKER-006): the seeder
+    # only SCANS <AUDIO_STORAGE_PATH>/audio = /data/audio to build the
+    # catalog from the real library (plus any previously uploaded files).
+    # Without the mount the scan no-ops (warn + leave DB as-is).
     volumes:
       - ./audio:/data/audio:ro
     command: ["sh", "scripts/seed-with-guard.sh"]

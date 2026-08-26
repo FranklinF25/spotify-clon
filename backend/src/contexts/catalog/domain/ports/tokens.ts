@@ -22,3 +22,13 @@
  * CATALOG_REPOSITORY_PORT").
  */
 export const CATALOG_REPOSITORY_PORT = Symbol('CATALOG_REPOSITORY_PORT');
+
+/**
+ * DI token for the `AudioFileWriterPort` driven port (REQ-UPLOAD-001).
+ * Implemented by `FsAudioFileWriter` (catalog infrastructure) in production
+ * and bound via `useFactory` + `inject: [ENV_CONFIG]` in `CatalogModule` —
+ * the explicit-factory pattern every catalog provider follows (esbuild /
+ * Vitest reflect-metadata caveat). `CatalogModule` does NOT export the
+ * token: the writer is catalog-internal (no cross-context consumer).
+ */
+export const AUDIO_FILE_WRITER_PORT = Symbol('AUDIO_FILE_WRITER_PORT');

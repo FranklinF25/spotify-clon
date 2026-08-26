@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 import type {
+  CatalogEntryInput,
   CatalogRepositoryPort,
   ListInput,
   SearchInput,
@@ -39,6 +40,10 @@ import { Track } from '../domain/track.entity';
  * (the IMMUTABLE wrapper around `public.unaccent` — see migration
  * `0001_catalog`), so the query side MUST call `catalog_unaccent($1)` too.
  * Using `public.unaccent` directly would NOT match the indexed columns.
+ *
+ * `upsertCatalogEntry` (REQ-UPLOAD-002) is the port's first WRITE — three
+ * raw `ON CONFLICT ("id") DO UPDATE` statements in one `$transaction`,
+ * mirroring the seeder's sync semantics (see the method docstring).
  */
 export class PrismaCatalogRepository implements CatalogRepositoryPort {
   constructor(private readonly prisma: PrismaClient) {}
@@ -208,6 +213,47 @@ export class PrismaCatalogRepository implements CatalogRepositoryPort {
       durationSeconds: r.duration_seconds,
       albumId: r.album_id,
     }));
+  }
+
+  async upsertCatalogEntry(entry: CatalogEntryInput): Promise<void> {
+    // REQ-UPLOAD-002 — the port's first WRITE. Raw `ON CONFLICT ("id") DO
+    // UPDATE` statements mirror `prisma/seed.ts` `runSeed` VERBATIM (same
+    // column lists, same EXCLUDED bindings) so an upload and a re-seed are
+    // interchangeable writers to the same rows. All three statements run in
+    // ONE `$transaction`: a partial write (track row without its album)
+    // must never be observable. Artists before albums before tracks — the
+    // FK dependency order. bio/image_url/cover_url are not uploadable and
+    // bind NULL on both insert and update (seed parity: a re-seed resets
+    // them to NULL too).
+    await this.prisma.$transaction([
+      this.prisma.$executeRaw`
+        INSERT INTO "artists" ("id", "name", "bio", "image_url")
+        VALUES (${entry.artist.id}::uuid, ${entry.artist.name}, NULL, NULL)
+        ON CONFLICT ("id") DO UPDATE SET
+          "name" = EXCLUDED."name",
+          "bio" = EXCLUDED."bio",
+          "image_url" = EXCLUDED."image_url"
+      `,
+      this.prisma.$executeRaw`
+        INSERT INTO "albums" ("id", "title", "release_year", "cover_url", "artist_id")
+        VALUES (${entry.album.id}::uuid, ${entry.album.title}, ${entry.album.releaseYear}, NULL, ${entry.album.artistId}::uuid)
+        ON CONFLICT ("id") DO UPDATE SET
+          "title" = EXCLUDED."title",
+          "release_year" = EXCLUDED."release_year",
+          "cover_url" = EXCLUDED."cover_url",
+          "artist_id" = EXCLUDED."artist_id"
+      `,
+      this.prisma.$executeRaw`
+        INSERT INTO "tracks" ("id", "title", "duration_seconds", "file_path", "track_number", "album_id")
+        VALUES (${entry.track.id}::uuid, ${entry.track.title}, ${entry.track.durationSeconds}, ${entry.track.filePath}, ${entry.track.trackNumber}, ${entry.track.albumId}::uuid)
+        ON CONFLICT ("id") DO UPDATE SET
+          "title" = EXCLUDED."title",
+          "duration_seconds" = EXCLUDED."duration_seconds",
+          "file_path" = EXCLUDED."file_path",
+          "track_number" = EXCLUDED."track_number",
+          "album_id" = EXCLUDED."album_id"
+      `,
+    ]);
   }
 }
 

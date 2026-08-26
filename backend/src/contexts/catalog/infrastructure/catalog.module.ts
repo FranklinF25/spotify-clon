@@ -7,10 +7,15 @@ import { GetTrackUseCase } from '../application/get-track.use-case';
 import { ListAlbumsUseCase } from '../application/list-albums.use-case';
 import { ListArtistsUseCase } from '../application/list-artists.use-case';
 import { SearchCatalogUseCase } from '../application/search-catalog.use-case';
+import { UploadTrackUseCase } from '../application/upload-track.use-case';
+import type { EnvConfig } from '../../../config';
+import { ENV_CONFIG } from '../../../config.tokens';
 import { AuthModule } from '../../identity/infrastructure/auth.module';
 import { PrismaModule } from '../../../shared/prisma.module';
-import { CATALOG_REPOSITORY_PORT } from '../domain/ports/tokens';
+import { AUDIO_FILE_WRITER_PORT, CATALOG_REPOSITORY_PORT } from '../domain/ports/tokens';
+import type { AudioFileWriterPort } from '../domain/ports/audio-file-writer.port';
 import { CatalogController } from './catalog.controller';
+import { FsAudioFileWriter } from './fs-audio-file-writer';
 import { PrismaCatalogRepository } from './prisma-catalog.repository';
 
 /**
@@ -38,7 +43,11 @@ import { PrismaCatalogRepository } from './prisma-catalog.repository';
  * NO `CATALOG_CONFIG` token (catalog has no env-driven config — R2-CRIT-4
  * dropped every catalog env knob). Identity's `IDENTITY_CONFIG` is
  * load-bearing there because identity has env-driven knobs (DATABASE_URL,
- * JWT secret, argon params); catalog has none.
+ * JWT secret, argon params); catalog has none. The upload path (REQ-UPLOAD-001)
+ * reads `AUDIO_STORAGE_PATH` off the GLOBAL `ENV_CONFIG` token (provided by
+ * `ConfigModule`, injected by `FsAudioFileWriter`'s factory) — an
+ * infrastructure adapter concern, not a catalog env knob, so no dedicated
+ * config token is introduced.
  *
  * Cross-context port export (PB-PR2-02 — additive, C3 fix): the module
  * additively binds `{ provide: CATALOG_REPOSITORY_PORT,
@@ -92,6 +101,27 @@ import { PrismaCatalogRepository } from './prisma-catalog.repository';
       provide: SearchCatalogUseCase,
       inject: [PrismaCatalogRepository],
       useFactory: (repo: PrismaCatalogRepository) => new SearchCatalogUseCase(repo),
+    },
+    // NEW (REQ-UPLOAD-001) — audio file writer adapter. Reads
+    // AUDIO_STORAGE_PATH off the validated EnvConfig and writes uploads
+    // under `<AUDIO_STORAGE_PATH>/audio` (the seeder/streaming root). NOT
+    // exported: the writer is catalog-internal, no cross-context consumer.
+    {
+      provide: AUDIO_FILE_WRITER_PORT,
+      useFactory: (config: EnvConfig) => new FsAudioFileWriter(config),
+      inject: [ENV_CONFIG],
+    },
+    // NEW (REQ-UPLOAD-001) — upload driving use case. Injects the CONCRETE
+    // repository (catalog-internal convention: catalog's own use cases
+    // resolve `PrismaCatalogRepository` by class; only cross-context
+    // consumers go through the CATALOG_REPOSITORY_PORT token) plus the
+    // writer port. `inject` order MUST match the constructor param order
+    // (catalog, writer).
+    {
+      provide: UploadTrackUseCase,
+      inject: [PrismaCatalogRepository, AUDIO_FILE_WRITER_PORT],
+      useFactory: (repo: PrismaCatalogRepository, writer: AudioFileWriterPort) =>
+        new UploadTrackUseCase(repo, writer),
     },
   ],
   // NEW (PB-PR2-02 — additive) — playback's `PlaybackModule` injects the

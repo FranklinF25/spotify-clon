@@ -211,6 +211,12 @@ describe('architecture portfolio (DESIGN 3.4)', () => {
         name: 'CatalogRepositoryPort',
         path: 'contexts/catalog/domain/ports/catalog-repository.port.ts',
       },
+      // Upload write path (REQ-UPLOAD-001) — catalog's file-writing driven
+      // port, declared alongside the repository port in the same tree.
+      {
+        name: 'AudioFileWriterPort',
+        path: 'contexts/catalog/domain/ports/audio-file-writer.port.ts',
+      },
       // Playback driven ports (PB-PR1-04 + PB-PR1-05). Catalog's port is
       // re-exported via `playback/domain/ports/catalog-repo.port.ts` shim —
       // it stays declared in catalog's tree, so it is NOT re-listed here.

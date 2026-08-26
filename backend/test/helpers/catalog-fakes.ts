@@ -1,4 +1,5 @@
 import type {
+  CatalogEntryInput,
   CatalogRepositoryPort,
   ListInput,
   SearchInput,
@@ -127,6 +128,48 @@ export class InMemoryCatalogRepository implements CatalogRepositoryPort {
           }))
           .slice(0, input.limit);
     return { artists, albums, tracks };
+  }
+
+  async upsertCatalogEntry(entry: CatalogEntryInput): Promise<void> {
+    // Port contract (REQ-UPLOAD-002): deterministic ids → insert-or-REPLACE
+    // per id (row-idempotent). bio/imageUrl/coverUrl are not uploadable —
+    // NULL on every write, mirroring the Prisma adapter's NULL bindings.
+    // createdAt is preserved on replace (the real adapter's ON CONFLICT DO
+    // UPDATE never touches created_at either).
+    const existingArtist = this.artists.find((a) => a.id === entry.artist.id);
+    this.upsertById(this.artists, Artist.reconstruct({
+      id: entry.artist.id,
+      name: entry.artist.name,
+      bio: null,
+      imageUrl: null,
+      createdAt: existingArtist ? existingArtist.createdAt : EPOCH,
+    }));
+    const existingAlbum = this.albums.find((a) => a.id === entry.album.id);
+    this.upsertById(this.albums, Album.reconstruct({
+      id: entry.album.id,
+      title: entry.album.title,
+      releaseYear: entry.album.releaseYear,
+      coverUrl: null,
+      artistId: entry.album.artistId,
+      createdAt: existingAlbum ? existingAlbum.createdAt : EPOCH,
+    }));
+    const existingTrack = this.tracks.find((t) => t.id === entry.track.id);
+    this.upsertById(this.tracks, Track.reconstruct({
+      id: entry.track.id,
+      title: entry.track.title,
+      durationSeconds: entry.track.durationSeconds,
+      filePath: entry.track.filePath,
+      trackNumber: entry.track.trackNumber,
+      albumId: entry.track.albumId,
+      createdAt: existingTrack ? existingTrack.createdAt : EPOCH,
+    }));
+  }
+
+  /** Insert-or-replace by id (append when new, splice-in-place when known). */
+  private upsertById<T extends { id: string }>(rows: T[], next: T): void {
+    const index = rows.findIndex((row) => row.id === next.id);
+    if (index === -1) rows.push(next);
+    else rows[index] = next;
   }
 
   private toArtistSummary(artistId: string): ArtistSummary {

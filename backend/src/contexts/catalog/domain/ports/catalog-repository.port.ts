@@ -30,6 +30,29 @@ export interface SearchInput {
 }
 
 /**
+ * Write-side input for {@link CatalogRepositoryPort.upsertCatalogEntry} —
+ * one artist / album / track triple with ALREADY-DERIVED deterministic ids
+ * (the caller derives them with the shared `audio-meta` kernel so uploads
+ * and re-seeds converge on the same rows).
+ *
+ * Mirrors the seeder's snapshot rows (camelCase domain naming): bio /
+ * image_url / cover_url are not uploadable (NULL on insert), matching the
+ * seed's own values.
+ */
+export interface CatalogEntryInput {
+  artist: { id: string; name: string };
+  album: { id: string; title: string; releaseYear: number | null; artistId: string };
+  track: {
+    id: string;
+    title: string;
+    durationSeconds: number;
+    filePath: string;
+    trackNumber: number;
+    albumId: string;
+  };
+}
+
+/**
  * Driven port (secondary) — abstracts read access to the catalog.
  *
  * CROSS-CONTEXT CONTRACT — consumed by:
@@ -44,13 +67,15 @@ export interface SearchInput {
  * ├──────────────────────────────────────────────────────────────────────────┤
  * │ • ADDITIVE evolution (NON-BREAKING): adding new methods to this port     │
  * │   (e.g. a future `findArtistsByGenre`) does NOT break `playback`. New    │
- * │   methods may be added freely.                                           │
+ * │   methods may be added freely. `upsertCatalogEntry` (REQ-UPLOAD-002) is  │
+ * │   the FIRST exercise of this rule — the port's first WRITE method,      │
+ * │   added alongside the original 7 reads without touching any of them.    │
  * │ • MUTATING evolution (BREAKING for every consumer): renaming or          │
- * │   re-typing any of the 7 methods below forces churn in every consumer.   │
- * │   What stays locked is the signature of these 7 methods.                 │
+ * │   re-typing any of the 8 methods below forces churn in every consumer.   │
+ * │   What stays locked is the signature of these 8 methods.                 │
  * │                                                                          │
  * │ Mutations that would force churn later (all BREAKING):                   │
- * │   - renaming any of the 7 locked methods;                                │
+ * │   - renaming any of the 8 locked methods;                                │
  * │   - changing return types (e.g. dropping AlbumDetail for two methods);   │
  * │   - replacing the Track entity's shape (e.g. moving filePath out);       │
  * │   - splitting the port into multiple smaller ports.                      │
@@ -126,4 +151,21 @@ export interface CatalogRepositoryPort {
    * to clients (ordering is a repository-side decision).
    */
   search(input: SearchInput): Promise<SearchResult>;
+
+  /**
+   * Upsert ONE catalog entry (artist + album + track) in dependency order
+   * inside a single transaction (REQ-UPLOAD-002 — the port's first WRITE
+   * method, additive per the EVOLUTION RULES above).
+   *
+   * Row-idempotent by contract: the ids in {@link CatalogEntryInput} are
+   * deterministic (derived by the caller), so re-uploading the same derived
+   * path OVERWRITES the same rows instead of duplicating them — mirroring
+   * the seeder's `ON CONFLICT ("id") DO UPDATE` sync semantics. On conflict
+   * every mutable column is updated from the input (a NULL `releaseYear`
+   * overwrites a previous year, exactly like a re-seed would).
+   *
+   * The upserted track is immediately visible to every read method (search
+   * included) once the promise resolves.
+   */
+  upsertCatalogEntry(entry: CatalogEntryInput): Promise<void>;
 }
