@@ -30,7 +30,7 @@ export function SeekBar({
 }: SeekBarProps) {
   return (
     <input
-      className={styles.bar}
+      className={`${styles.slider} ${styles.seek}`}
       type="range"
       role="slider"
       aria-label="Seek"

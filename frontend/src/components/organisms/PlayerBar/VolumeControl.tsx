@@ -14,7 +14,7 @@ interface VolumeControlProps {
 export function VolumeControl({ value, onChange }: VolumeControlProps) {
   return (
     <input
-      className={styles.bar}
+      className={`${styles.slider} ${styles.volume}`}
       type="range"
       aria-label="Volume"
       aria-valuenow={value}

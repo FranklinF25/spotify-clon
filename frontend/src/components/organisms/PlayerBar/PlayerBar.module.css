@@ -7,3 +7,26 @@
   color: var(--color-text);
   background-color: var(--color-bg-elevated);
 }
+
+/*
+ * Transport sliders. Previously BOTH inputs reused the container's `.bar`
+ * class (name collision) — width:100% + padding made the seek and volume
+ * sliders render as two identical full-width bars, reading as a duplicated
+ * player bar. Spotify's reference layout: one WIDE seek bar in the center,
+ * one COMPACT volume slider on the right. Roles are now separate classes.
+ */
+.slider {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.seek {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 40rem;
+}
+
+.volume {
+  flex: 0 0 auto;
+  width: 5.5rem;
+}
