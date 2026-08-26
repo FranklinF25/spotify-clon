@@ -48,6 +48,10 @@ async function makeTmpAudioRoot(): Promise<{ root: string; cleanup: () => Promis
   // has room beyond the requested range.
   const fixtureBytes = Buffer.alloc(4096, 0);
   await fs.writeFile(join(root, 'audio', 'sample.mp3'), fixtureBytes);
+  // FLAC twin — same byte length, different extension: proves the MIME is
+  // derived per file (audio/flac) and NOT hardcoded to audio/mpeg
+  // (REQ-PLAY-005 content-type fix; the seeder now seeds real .flac files).
+  await fs.writeFile(join(root, 'audio', 'sample.flac'), fixtureBytes);
   return { root, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
 
@@ -57,6 +61,17 @@ const SAMPLE_TRACK = Track.reconstruct({
   title: 'Sample',
   durationSeconds: 4,
   filePath: '/audio/sample.mp3',
+  trackNumber: 1,
+  albumId: '00000000-0000-0000-0000-000000000010',
+  createdAt: new Date('2024-01-01'),
+});
+
+const FLAC_TRACK_ID = '00000000-0000-0000-0000-000000000002';
+const SAMPLE_FLAC_TRACK = Track.reconstruct({
+  id: FLAC_TRACK_ID,
+  title: 'Sample FLAC',
+  durationSeconds: 4,
+  filePath: '/audio/sample.flac',
   trackNumber: 1,
   albumId: '00000000-0000-0000-0000-000000000010',
   createdAt: new Date('2024-01-01'),
@@ -211,6 +226,47 @@ describe('PlaybackController (integration)', () => {
         expect(res.status).toBe(206);
         expect(res.headers['accept-ranges']).toBe('bytes');
         expect(res.headers['content-type']).toBe('audio/mpeg');
+        expect(res.headers['content-range']).toBe('bytes 0-1023/4096');
+        expect(Number(res.headers['content-length'])).toBe(1024);
+        expect(res.body.length).toBe(1024);
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('200 FLAC — Content-Type derives from the file extension (audio/flac, NOT audio/mpeg)', async () => {
+      // REQ-PLAY-005 content-type fix: the seeder now seeds real .flac files;
+      // a hardcoded audio/mpeg served them with the wrong MIME. The real
+      // FsAudioStorage derives audio/flac from the resolved extension and the
+      // response builder forwards it end-to-end.
+      const app = await bootApp(audioRoot, {
+        catalog: makeCatalogRepo({ findByIdReturn: SAMPLE_FLAC_TRACK }),
+      });
+      try {
+        const res = await request(app.getHttpServer())
+          .get(`/api/v1/tracks/${FLAC_TRACK_ID}/stream`)
+          .set('Authorization', 'Bearer test');
+
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toBe('audio/flac');
+        expect(Number(res.headers['content-length'])).toBe(4096);
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('206 FLAC — Range stream also carries the derived audio/flac Content-Type', async () => {
+      const app = await bootApp(audioRoot, {
+        catalog: makeCatalogRepo({ findByIdReturn: SAMPLE_FLAC_TRACK }),
+      });
+      try {
+        const res = await request(app.getHttpServer())
+          .get(`/api/v1/tracks/${FLAC_TRACK_ID}/stream`)
+          .set('Authorization', 'Bearer test')
+          .set('Range', 'bytes=0-1023');
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-type']).toBe('audio/flac');
         expect(res.headers['content-range']).toBe('bytes 0-1023/4096');
         expect(Number(res.headers['content-length'])).toBe(1024);
         expect(res.body.length).toBe(1024);

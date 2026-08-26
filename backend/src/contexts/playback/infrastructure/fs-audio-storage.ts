@@ -7,6 +7,36 @@ import type { AudioStoragePort } from '../domain/ports/audio-storage.port';
 import type { AudioStream } from '../domain/types';
 
 /**
+ * Extension → `Content-Type` MIME map (REQ-PLAY-005 content-type fix).
+ *
+ * The catalog is no longer mp3-only (the seeder scans .flac/.ogg/.m4a/
+ * .wav/.opus too), so streaming everything as a hardcoded `audio/mpeg`
+ * served FLAC with the wrong MIME — strict clients (<audio> elements,
+ * media players) refuse to play mismatched types. Keyed on the LOWERCASED
+ * extension of the RESOLVED file path; unknown extensions fall back to
+ * `audio/mpeg` (the previous behavior) rather than guessing.
+ *
+ * `opus` maps to `audio/ogg` (Opus is transported in an Ogg container —
+ * RFC 7845; `audio/opus` is the bare-codec type some clients reject).
+ */
+export const AUDIO_CONTENT_TYPES: Readonly<Record<string, string>> = Object.freeze({
+  '.mp3': 'audio/mpeg',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.wav': 'audio/wav',
+});
+
+/** Fallback MIME for extensions outside the map (previous behavior). */
+const DEFAULT_CONTENT_TYPE = 'audio/mpeg';
+
+/** Derive the stream `Content-Type` from a resolved file path's extension. */
+export function contentTypeForPath(filePath: string): string {
+  return AUDIO_CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? DEFAULT_CONTENT_TYPE;
+}
+
+/**
  * Driven adapter (infrastructure) that turns `AudioStoragePort` into
  * `node:fs` calls. The ONLY place in playback that touches the filesystem.
  *
@@ -54,10 +84,14 @@ export class FsAudioStorage implements AudioStoragePort {
     return absolute;
   }
 
-  async stat(filePath: string): Promise<{ size: number }> {
+  async stat(filePath: string): Promise<{ size: number; contentType: string }> {
     try {
-      const stats = await fs.stat(this.resolve(filePath));
-      return { size: stats.size };
+      const resolved = this.resolve(filePath);
+      const stats = await fs.stat(resolved);
+      // MIME derives from the RESOLVED extension (not the DB string) so the
+      // map sees the real on-disk suffix; unknown extensions keep the
+      // audio/mpeg default (see AUDIO_CONTENT_TYPES).
+      return { size: stats.size, contentType: contentTypeForPath(resolved) };
     } catch (err) {
       // W-fs-stat-enoent — ENOENT would otherwise bubble as an undocumented
       // 500. Translate to NotFoundError('audio-file', path) so the global

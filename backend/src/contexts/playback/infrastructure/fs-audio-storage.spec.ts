@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { EnvConfig } from '../../../config';
 import { NotFoundError } from '../../../shared/errors/not-found-error';
-import { FsAudioStorage } from './fs-audio-storage';
+import { AUDIO_CONTENT_TYPES, contentTypeForPath, FsAudioStorage } from './fs-audio-storage';
 
 /**
  * Unit spec for `FsAudioStorage` (PB-PR1-10).
@@ -20,6 +20,11 @@ import { FsAudioStorage } from './fs-audio-storage';
  *      (W-fs-stat-enoent — NOT a generic 500);
  *   5. `open(filePath, null)` returns a Readable whose bytes match the file
  *      content (read the stream into a Buffer and assert equality).
+ *
+ * Covers the REQ-PLAY-005 content-type fix: `stat()` derives the MIME from
+ * the RESOLVED extension via `AUDIO_CONTENT_TYPES` (flac → audio/flac, ...,
+ * unknown → audio/mpeg default) so FLAC and other formats stream with the
+ * correct Content-Type instead of the old hardcoded audio/mpeg.
  *
  * Uses `os.tmpdir()` + `fs.mkdtemp` for an isolated, OS-cleaned fixture root.
  * Each test creates its own tmp fixture and tears it down in afterEach.
@@ -64,6 +69,9 @@ describe('FsAudioStorage', () => {
       const result = await storage.stat('album/track.mp3');
 
       expect(result.size).toBe(payload.length);
+      // .mp3 extension derives audio/mpeg (the map's default holds for the
+      // historical mp3 fixture — the fix must not regress it).
+      expect(result.contentType).toBe('audio/mpeg');
     });
 
     it('2. rejects a path-traversal attempt (../../../etc/passwd) inside resolve()', async () => {
@@ -133,6 +141,47 @@ describe('FsAudioStorage', () => {
       // end is INCLUSIVE (RFC 7233) — 1123 - 100 + 1 = 1024 bytes.
       expect(drained.length).toBe(1024);
       expect(drained.equals(payload.subarray(100, 1124))).toBe(true);
+    });
+  });
+
+  describe('REQ-PLAY-005 — contentType derivation from the resolved extension', () => {
+    // The catalog now seeds FLAC/OGG/M4A/WAV/OPUS alongside MP3; streaming
+    // them all as audio/mpeg broke strict clients. stat() must report the
+    // per-extension MIME.
+    it('derives audio/flac for a .flac file', async () => {
+      const payload = Buffer.from('flac-bytes');
+      await fs.writeFile(join(root, 'song.flac'), payload);
+
+      const storage = new FsAudioStorage(makeConfig(root));
+
+      const result = await storage.stat('song.flac');
+
+      expect(result).toEqual({ size: payload.length, contentType: 'audio/flac' });
+    });
+
+    it('matches every pinned extension case-insensitively (Song.FLAC → audio/flac)', async () => {
+      await fs.writeFile(join(root, 'Song.FLAC'), Buffer.from('x'));
+
+      const storage = new FsAudioStorage(makeConfig(root));
+
+      expect((await storage.stat('Song.FLAC')).contentType).toBe('audio/flac');
+    });
+
+    it('exposes the full map: mp3/flac/ogg/opus/m4a/wav + audio/mpeg default', () => {
+      expect(AUDIO_CONTENT_TYPES).toEqual({
+        '.mp3': 'audio/mpeg',
+        '.flac': 'audio/flac',
+        '.ogg': 'audio/ogg',
+        '.opus': 'audio/ogg',
+        '.m4a': 'audio/mp4',
+        '.wav': 'audio/wav',
+      });
+      // Unknown extensions keep the audio/mpeg default (previous behavior —
+      // no guessing for exotic containers).
+      expect(contentTypeForPath('/data/audio/song.xyz')).toBe('audio/mpeg');
+      expect(contentTypeForPath('/data/audio/song')).toBe('audio/mpeg');
+      // Opus travels in an Ogg container → audio/ogg (RFC 7845).
+      expect(contentTypeForPath('/data/audio/song.opus')).toBe('audio/ogg');
     });
   });
 

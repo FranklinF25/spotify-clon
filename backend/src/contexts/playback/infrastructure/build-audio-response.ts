@@ -27,9 +27,12 @@ import type { StreamResult } from '../domain/types';
  * Set headers for the 200 / 206 success paths.
  *
  * Both paths set `Accept-Ranges: bytes` (so RFC-compliant clients know they
- * may issue `Range` requests) and `Content-Type: audio/mpeg`. The 200 path
- * sets `Content-Length: total`; the 206 path additionally sets
- * `Content-Range: bytes start-end/total` and `Content-Length: end - start + 1`.
+ * may issue `Range` requests) and `Content-Type` forwarded from
+ * `payload.result.contentType` — the MIME the storage adapter derived from
+ * the resolved file extension (flac → audio/flac, mp3 → audio/mpeg, ...;
+ * REQ-PLAY-005 content-type fix). The 200 path sets `Content-Length: total`;
+ * the 206 path additionally sets `Content-Range: bytes start-end/total` and
+ * `Content-Length: end - start + 1`.
  *
  * No `as any` casts and no runtime narrowing on `status` — the helper is
  * total over its declared `payload: { status: 200 | 206; result: StreamResult }`
@@ -41,7 +44,7 @@ export function buildAudioHeaders(
 ): void {
   res.status(payload.status);
   res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Content-Type', payload.result.contentType);
 
   // Narrow on `result.kind` — see module docstring + R4 Judgment Day fix.
   if (payload.result.kind === 'full') {

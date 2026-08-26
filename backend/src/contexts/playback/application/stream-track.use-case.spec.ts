@@ -68,7 +68,7 @@ function setup(overrides?: {
   };
 
   const storage: AudioStoragePort = {
-    stat: vi.fn().mockResolvedValue({ size: 2048 }),
+    stat: vi.fn().mockResolvedValue({ size: 2048, contentType: 'audio/mpeg' }),
     open: vi.fn().mockReturnValue(stream),
     ...overrides?.storage,
   };
@@ -117,6 +117,11 @@ describe('StreamTrackUseCase', () => {
 
     it('2. returns { status: 200, result.kind: "full" } when no Range header is present', async () => {
       const { useCase, storage, stream } = setup({
+        storage: {
+          // FLAC fixture — proves the stat-reported contentType flows into
+          // the 'full' StreamResult verbatim (REQ-PLAY-005 content-type fix).
+          stat: vi.fn().mockResolvedValue({ size: 2048, contentType: 'audio/flac' }),
+        },
         rangeParser: {
           parse: vi.fn().mockReturnValue({ ok: true, range: null }),
         },
@@ -130,6 +135,7 @@ describe('StreamTrackUseCase', () => {
       expect(result.kind).toBe('full');
       if (result.kind !== 'full') throw new Error('narrow');
       expect(result.total).toBe(2048);
+      expect(result.contentType).toBe('audio/flac');
       expect(result.stream).toBe(stream);
       // open() called with null range → full-content stream.
       expect(storage.open).toHaveBeenCalledWith('/audio/album/track-1.mp3', null);
@@ -137,6 +143,9 @@ describe('StreamTrackUseCase', () => {
 
     it('3. returns { status: 206, result.kind: "partial" } when the range is satisfiable', async () => {
       const { useCase, storage, stream } = setup({
+        storage: {
+          stat: vi.fn().mockResolvedValue({ size: 2048, contentType: 'audio/ogg' }),
+        },
         rangeParser: {
           parse: vi.fn().mockReturnValue({
             ok: true,
@@ -153,6 +162,7 @@ describe('StreamTrackUseCase', () => {
       expect(result.kind).toBe('partial');
       if (result.kind !== 'partial') throw new Error('narrow');
       expect(result.range).toEqual({ start: 0, end: 1023, total: 2048 });
+      expect(result.contentType).toBe('audio/ogg');
       expect(result.stream).toBe(stream);
       // open() called with the parsed {start, end} → partial stream.
       expect(storage.open).toHaveBeenCalledWith('/audio/album/track-1.mp3', {
@@ -225,7 +235,7 @@ describe('StreamTrackUseCase', () => {
 
     it('passes the file size and the raw Range header to the range parser', async () => {
       const { useCase, rangeParser } = setup({
-        storage: { stat: vi.fn().mockResolvedValue({ size: 4096 }) },
+        storage: { stat: vi.fn().mockResolvedValue({ size: 4096, contentType: 'audio/mpeg' }) },
       });
 
       await useCase.execute('track-1', 'bytes=0-1023');

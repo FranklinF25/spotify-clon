@@ -58,7 +58,10 @@ export class StreamTrackUseCase {
     const track = await this.catalog.findTrackById(trackId);
     if (!track) throw new NotFoundError('track', trackId);
 
-    const { size } = await this.storage.stat(track.filePath);
+    // `contentType` rides along with the size (REQ-PLAY-005 content-type
+    // fix): the storage adapter derives it from the resolved extension and
+    // both StreamResult variants forward it to the response builder.
+    const { size, contentType } = await this.storage.stat(track.filePath);
     const parsed = this.rangeParser.parse(size, rangeHeader);
 
     if (!parsed.ok) {
@@ -73,13 +76,16 @@ export class StreamTrackUseCase {
 
     if (parsed.range === null) {
       const stream = this.storage.open(track.filePath, null);
-      return { status: 200, result: { kind: 'full', stream, total: size } };
+      return { status: 200, result: { kind: 'full', stream, total: size, contentType } };
     }
 
     const stream = this.storage.open(track.filePath, {
       start: parsed.range.start,
       end: parsed.range.end,
     });
-    return { status: 206, result: { kind: 'partial', stream, range: parsed.range } };
+    return {
+      status: 206,
+      result: { kind: 'partial', stream, range: parsed.range, contentType },
+    };
   }
 }

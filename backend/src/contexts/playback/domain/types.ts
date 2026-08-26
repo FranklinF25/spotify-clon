@@ -37,10 +37,18 @@ export type AudioStream = Readable;
  * it is returned by the use case as a sibling branch `{ status: 416, total }`
  * OUTSIDE the StreamResult wrapper. StreamResult only describes successful
  * (200 / 206) outcomes.
+ *
+ * `contentType` (REQ-PLAY-005 content-type fix): the MIME type of the
+ * streamed file, derived by the storage adapter from the resolved file
+ * extension (flac → audio/flac, mp3 → audio/mpeg, ...). The response builder
+ * forwards it as the HTTP `Content-Type` — a hardcoded `audio/mpeg` served
+ * FLAC streams with the wrong MIME and broke <audio> playback in strict
+ * clients. A plain `string` — no imports (architecture test forbids runtime
+ * imports in domain).
  */
 export type StreamResult =
-  | { kind: 'full'; stream: AudioStream; total: number }
-  | { kind: 'partial'; stream: AudioStream; range: RangeResult };
+  | { kind: 'full'; stream: AudioStream; total: number; contentType: string }
+  | { kind: 'partial'; stream: AudioStream; range: RangeResult; contentType: string };
 
 /**
  * Result of parsing an HTTP `Range` header against a known file size.

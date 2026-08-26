@@ -49,19 +49,21 @@ function makeStream() {
 
 describe('build-audio-response', () => {
   describe('buildAudioHeaders — 200 full body', () => {
-    it("sets Accept-Ranges, Content-Type, Content-Length (= total) and status 200; NO Content-Range", () => {
+    it("sets Accept-Ranges, Content-Type (from result.contentType), Content-Length (= total) and status 200; NO Content-Range", () => {
       const res = makeResMock();
       const stream = makeStream();
       const payload = {
         status: 200 as const,
-        result: { kind: 'full' as const, stream, total: 1234 },
+        result: { kind: 'full' as const, stream, total: 1234, contentType: 'audio/flac' },
       };
 
       buildAudioHeaders(res, payload);
 
       expect(res._statusCalls).toEqual([200]);
       expect(res._headers.get('accept-ranges')).toBe('bytes');
-      expect(res._headers.get('content-type')).toBe('audio/mpeg');
+      // REQ-PLAY-005 content-type fix — the header ECHOES the contentType
+      // the caller constructed (here audio/flac, NOT a hardcoded audio/mpeg).
+      expect(res._headers.get('content-type')).toBe('audio/flac');
       expect(res._headers.get('content-length')).toBe(1234);
       expect(res._headers.has('content-range')).toBe(false);
     });
@@ -77,6 +79,7 @@ describe('build-audio-response', () => {
           kind: 'partial' as const,
           stream,
           range: { start: 0, end: 1023, total: 1234 },
+          contentType: 'audio/mpeg',
         },
       };
 
@@ -99,6 +102,7 @@ describe('build-audio-response', () => {
           kind: 'partial' as const,
           stream,
           range: { start: 500, end: 1023, total: 1234 },
+          contentType: 'audio/ogg',
         },
       };
 
@@ -106,6 +110,7 @@ describe('build-audio-response', () => {
 
       expect(res._headers.get('content-range')).toBe('bytes 500-1023/1234');
       expect(res._headers.get('content-length')).toBe(524); // 1023 - 500 + 1
+      expect(res._headers.get('content-type')).toBe('audio/ogg');
     });
   });
 
@@ -134,11 +139,17 @@ describe('build-audio-response', () => {
     it("compiles when both StreamResult variants are supplied (full + partial)", () => {
       // If narrowing were broken, the type-check on these calls would fail
       // at compile time (this test would not reach `expect`).
-      const full: StreamResult = { kind: 'full', stream: makeStream(), total: 10 };
+      const full: StreamResult = {
+        kind: 'full',
+        stream: makeStream(),
+        total: 10,
+        contentType: 'audio/mpeg',
+      };
       const partial: StreamResult = {
         kind: 'partial',
         stream: makeStream(),
         range: { start: 0, end: 9, total: 10 },
+        contentType: 'audio/mpeg',
       };
 
       const res1 = makeResMock();

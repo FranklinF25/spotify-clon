@@ -17,12 +17,16 @@ import type { AudioStream } from '../types';
  */
 export interface AudioStoragePort {
   /**
-   * Returns the file size in bytes. Throws `NotFoundError('audio-file', path)`
-   * if the file is missing on disk — this maps to the existing `NOT_FOUND`
+   * Returns the file size in bytes plus the `Content-Type` MIME derived
+   * from the resolved file extension (flac → audio/flac, mp3 →
+   * audio/mpeg, ...). Throws `NotFoundError('audio-file', path)` if the
+   * file is missing on disk — this maps to the existing `NOT_FOUND`
    * envelope (REQ-PLAY-001 404 path also covers "track exists in DB but
-   * file missing on disk", W-fs-stat-enoent).
+   * file missing on disk", W-fs-stat-enoent). The use case forwards
+   * `contentType` into the StreamResult so the response is served with the
+   * correct MIME instead of a hardcoded audio/mpeg.
    */
-  stat(filePath: string): Promise<{ size: number }>;
+  stat(filePath: string): Promise<{ size: number; contentType: string }>;
 
   /**
    * Opens a byte range (or the whole file when `range` is null) as a
