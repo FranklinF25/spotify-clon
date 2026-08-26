@@ -14,10 +14,18 @@ import { PlaylistDetailPage } from './PlaylistDetailPage';
 /**
  * FE-PR3-04 — PlaylistDetailPage (REQ-FE-015) integration.
  *
- * Composes PlaylistHeader + PlaylistTrackList + AddTrackForm. The "Play
- * playlist" handoff is the entire playback integration:
+ * Composes PlaylistHeader + PlaylistTrackList + AddTrackPicker (FE-PR5 UX
+ * fix: search-to-add replaced the old paste-a-track-UUID AddTrackForm). The
+ * "Play playlist" handoff is the entire playback integration:
  *   const onPlay = () => playFromList(tracks, 0);
  * `playFromList` is REUSED UNCHANGED from playerStore (zero store change).
+ *
+ * The picker add-flow tests run on REAL timers (the 300ms debounce elapses
+ * inside waitFor) and drive the full MSW chain: /search?type=track →
+ * POST /playlists/:id/tracks → tracks-cache invalidation → refetch. The
+ * search-result row title is DELIBERATELY different from the appended
+ * TrackPrimitive title ("New Song" vs "Song T4") so getByText never sees
+ * the picker row and the playlist row as one ambiguous match.
  *
  * Route mounting mirrors PlaylistsPage.spec.tsx: `/login` is a SIBLING outside
  * `<RequireAuth>` so an unauthenticated redirect cannot loop infinitely
@@ -113,8 +121,9 @@ describe('PlaylistDetailPage (REQ-FE-015)', () => {
     expect(s.isPlaying).toBe(true);
   });
 
-  it('adding a track invalidates the tracks cache and appends T4', async () => {
+  it('adding a track via the picker invalidates the tracks cache and appends T4', async () => {
     let calls = 0;
+    let seenType: string | null = null;
     server.use(
       http.get(endpoints.playlists.detail('P1'), () => HttpResponse.json(P1)),
       http.get(endpoints.playlists.tracks('P1'), () => {
@@ -129,15 +138,42 @@ describe('PlaylistDetailPage (REQ-FE-015)', () => {
           { status: 201 },
         ),
       ),
+      // The picker's debounced search → page adapter fetchQuery with the
+      // SINGULAR type param (same contract as use-search.spec).
+      http.get('/api/v1/search', ({ request }) => {
+        const url = new URL(request.url);
+        seenType = url.searchParams.get('type');
+        return HttpResponse.json({
+          artists: [],
+          albums: [],
+          tracks: [
+            {
+              id: 'T4',
+              title: 'New Song',
+              durationSeconds: 180,
+              albumId: 'L1',
+            },
+          ],
+        });
+      }),
     );
     mountPage();
     await waitFor(() =>
       expect(screen.getByText('Song T3')).toBeInTheDocument(),
     );
-    fireEvent.change(screen.getByLabelText(/track id/i), {
-      target: { value: 'T4' },
+    fireEvent.change(screen.getByLabelText(/search tracks/i), {
+      target: { value: 'New Song' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+    // Real timers: the 300ms debounce elapses inside waitFor.
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Add New Song' }),
+        ).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(seenType).toBe('track');
+    fireEvent.click(screen.getByRole('button', { name: 'Add New Song' }));
     await waitFor(() =>
       expect(screen.getByText('Song T4')).toBeInTheDocument(),
     );
@@ -244,7 +280,7 @@ describe('PlaylistDetailPage (REQ-FE-015)', () => {
     expect(screen.getByText('Song T3')).toBeInTheDocument();
   });
 
-  it('surfaces a 422 on unknown trackId add', async () => {
+  it('surfaces a 422 on unknown trackId add (picker row)', async () => {
     server.use(
       http.get(endpoints.playlists.detail('P1'), () => HttpResponse.json(P1)),
       http.get(endpoints.playlists.tracks('P1'), () =>
@@ -256,15 +292,36 @@ describe('PlaylistDetailPage (REQ-FE-015)', () => {
           { status: 422 },
         ),
       ),
+      http.get('/api/v1/search', () =>
+        HttpResponse.json({
+          artists: [],
+          albums: [],
+          tracks: [
+            {
+              id: 'T-NOPE',
+              title: 'Ghost Song',
+              durationSeconds: 180,
+              albumId: 'L1',
+            },
+          ],
+        }),
+      ),
     );
     mountPage();
     await waitFor(() =>
       expect(screen.getByText('Song T1')).toBeInTheDocument(),
     );
-    fireEvent.change(screen.getByLabelText(/track id/i), {
-      target: { value: 'T-NOPE' },
+    fireEvent.change(screen.getByLabelText(/search tracks/i), {
+      target: { value: 'Ghost Song' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole('button', { name: 'Add Ghost Song' }),
+        ).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add Ghost Song' }));
     await waitFor(() =>
       expect(screen.getByText(/track not found/i)).toBeInTheDocument(),
     );
