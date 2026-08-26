@@ -13,9 +13,16 @@
   color: var(--color-text-muted);
 }
 
+/*
+ * Sections stack VERTICALLY (was a 3-column minmax(260px,1fr) grid when the
+ * groups were plain-text lists). AlbumGrid's responsive card grid and
+ * TrackList's 4-column rows need the full content width — a 260px column
+ * would crush them. Same rhythm as the rest of the app (Home/Artist stack
+ * their shelves too).
+ */
 .groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: var(--space-5);
 }
 
@@ -40,6 +47,23 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+/*
+ * Artist result row: navigation (Link → /artists/:id), styled with the same
+ * row affordance TrackRow uses (padding + radius + surface hover) so the
+ * three sections read as one system. Existing CSS variables only.
+ */
+.artistRow {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.artistRow:hover {
+  background-color: var(--color-surface);
 }
 
 .empty {

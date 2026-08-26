@@ -16,13 +16,25 @@ import styles from './SearchBar.module.css';
  */
 interface SearchBarProps {
   onSubmit: (q: string) => void;
+  /**
+   * Live-typing seam (REQ-FE-010 live search): fires on EVERY keystroke with
+   * the raw input value so the CONTAINER can debounce + navigate. Optional —
+   * the molecule stays presentational and submit-driven for callers that do
+   * not live-search; the debounce deliberately lives in the page, NEVER here.
+   */
+  onChange?: (q: string) => void;
   /** Pre-fill (the SearchPage reads ?q= from the URL + seeds this). */
   initialValue?: string;
   /** Accessible label; defaults to "Search". */
   label?: string;
 }
 
-export function SearchBar({ onSubmit, initialValue = '', label = 'Search' }: SearchBarProps) {
+export function SearchBar({
+  onSubmit,
+  onChange,
+  initialValue = '',
+  label = 'Search',
+}: SearchBarProps) {
   const [value, setValue] = useState(initialValue);
   const id = useId();
 
@@ -45,7 +57,10 @@ export function SearchBar({ onSubmit, initialValue = '', label = 'Search' }: Sea
         className={styles.input}
         value={value}
         placeholder="Songs, artists, albums"
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          onChange?.(e.target.value);
+        }}
       />
       <Button type="submit" variant="ghost" aria-label="Go">
         <Icon name="search" size={16} aria-hidden="true" />
