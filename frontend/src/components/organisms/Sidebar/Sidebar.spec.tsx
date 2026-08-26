@@ -16,6 +16,9 @@ import { Sidebar } from './Sidebar';
  * Library graduates from the disabled stub into a live
  * `<NavLink to="/library">` now that the full library vertical exists.
  * ZERO stubs remain (the StubItem/STUBS machinery is deleted outright).
+ *
+ * F7 adds the Upload entry (`/upload`, between Search and Playlists) now
+ * that the authenticated upload surface exists (REQ-UPLOAD-002).
  */
 function renderSidebarAt(initial: string) {
   return render(
@@ -53,7 +56,7 @@ describe('Sidebar — REQ-FE-013 terminal state (zero stubs)', () => {
     expect(screen.getByRole('navigation')).toBeInTheDocument();
   });
 
-  it('renders Home + Search + Playlists + Library as real NavLinks', () => {
+  it('renders Home + Search + Upload + Playlists + Library as real NavLinks', () => {
     renderSidebarAt('/');
     expect(screen.getByRole('link', { name: /home/i })).toHaveAttribute(
       'href',
@@ -62,6 +65,10 @@ describe('Sidebar — REQ-FE-013 terminal state (zero stubs)', () => {
     expect(screen.getByRole('link', { name: /search/i })).toHaveAttribute(
       'href',
       '/search',
+    );
+    expect(screen.getByRole('link', { name: /upload/i })).toHaveAttribute(
+      'href',
+      '/upload',
     );
     expect(screen.getByRole('link', { name: /playlists/i })).toHaveAttribute(
       'href',
@@ -84,8 +91,8 @@ describe('Sidebar — REQ-FE-013 terminal state (zero stubs)', () => {
 
   it('no stub buttons remain — every entry is a live link', () => {
     renderSidebarAt('/');
-    // All four entries are links; zero disabled <button> placeholders.
-    expect(screen.getAllByRole('link')).toHaveLength(4);
+    // All five entries are links; zero disabled <button> placeholders.
+    expect(screen.getAllByRole('link')).toHaveLength(5);
     expect(screen.queryAllByRole('button')).toHaveLength(0);
   });
 

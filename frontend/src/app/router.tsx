@@ -12,6 +12,7 @@ import { HomePage } from '@/pages/HomePage';
 import { AlbumPage } from '@/pages/AlbumPage';
 import { ArtistPage } from '@/pages/ArtistPage';
 import { SearchPage } from '@/pages/SearchPage';
+import { UploadPage } from '@/pages/UploadPage';
 import { PlaylistsPage } from '@/pages/PlaylistsPage';
 import { PlaylistDetailPage } from '@/pages/PlaylistDetailPage';
 import { LibraryPage } from '@/pages/LibraryPage';
@@ -36,6 +37,7 @@ import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
  *      /albums/:id      AlbumPage (tracks + queue seeding — REQ-FE-009)
  *      /artists/:id     ArtistPage (embedded albums — REQ-FE-009)
  *      /search          SearchPage (PLACEHOLDER — real impl lands FE-PR4-06)
+ *      /upload          UploadPage (multi-file track upload — REQ-UPLOAD-002)
  *      /playlists       PlaylistsPage (owner list — REQ-FE-014, PR-3)
  *      /playlists/:id   PlaylistDetailPage (tracks + play handoff — REQ-FE-015)
  *      /library         LibraryPage (unified view — REQ-FE-016, F6)
@@ -72,6 +74,7 @@ export const routes: RouteObject[] = [
               { path: 'albums/:id', element: <AlbumPage /> },
               { path: 'artists/:id', element: <ArtistPage /> },
               { path: 'search', element: <SearchPage /> },
+              { path: 'upload', element: <UploadPage /> },
               { path: 'playlists', element: <PlaylistsPage /> },
               { path: 'playlists/:id', element: <PlaylistDetailPage /> },
               { path: 'library', element: <LibraryPage /> },

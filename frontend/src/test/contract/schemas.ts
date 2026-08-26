@@ -87,6 +87,26 @@ export const refreshResponseAssertionSchema = z
   })
   .strict();
 
+// Mirrors UploadTrackResult (POST /tracks/upload 201 body). REQUIRED keys so
+// a drifted backend projection (album omitted, or the internal storage path
+// leaking as `filePath`) REJECTS instead of rendering partial truth.
+export const uploadResultAssertionSchema = z.object({
+  track: z.object({
+    id: z.string(),
+    title: z.string(),
+    durationSeconds: z.number(),
+    albumId: z.string(),
+  }),
+  artist: z.object({
+    id: z.string(),
+    name: z.string(),
+  }),
+  album: z.object({
+    id: z.string(),
+    title: z.string(),
+  }),
+});
+
 /** Generic offset-pagination envelope, parameterised by the item shape. */
 export function paginatedAssertionSchema<T extends z.ZodTypeAny>(
   itemSchema: T,

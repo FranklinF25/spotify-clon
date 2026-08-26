@@ -6,6 +6,7 @@ import type {
   PaginatedResult,
   SearchResult,
   TrackPrimitive,
+  UploadResult,
   UserPrimitive,
 } from '@/types/api';
 
@@ -130,4 +131,24 @@ export function paginate<T>(
   pageSize = 20,
 ): PaginatedResult<T> {
   return { items, total: items.length, page, pageSize };
+}
+
+/** Mirrors `UploadTrackResult` — the 201 body of POST /tracks/upload. */
+export function buildUploadResult(
+  o: Partial<UploadResult> = {},
+): UploadResult {
+  const artist = o.artist ?? buildArtist();
+  const album = o.album ?? { id: nextId('album'), title: `Album ${seq}` };
+  return {
+    track: {
+      id: nextId('track'),
+      title: `Track ${seq}`,
+      durationSeconds: 200,
+      albumId: album.id,
+      ...o.track,
+    },
+    artist,
+    album,
+    ...o,
+  };
 }

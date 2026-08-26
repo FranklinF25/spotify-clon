@@ -19,10 +19,11 @@ const EXPECTED: ReadonlyArray<{ method: string; path: string }> = [
   { method: 'GET', path: '/api/v1/tracks/:id' },
   { method: 'GET', path: '/api/v1/search' },
   { method: 'GET', path: '/api/v1/tracks/:id/stream' },
+  { method: 'POST', path: '/api/v1/tracks/upload' },
 ];
 
 describe('MSW handler coverage (REQ-FE-005)', () => {
-  it('registers exactly the 12 slice-A endpoints', () => {
+  it('registers exactly the 12 slice-A endpoints + the F7 upload route', () => {
     expect(registeredPaths).toHaveLength(EXPECTED.length);
   });
 

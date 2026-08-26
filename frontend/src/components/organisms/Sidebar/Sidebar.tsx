@@ -5,11 +5,12 @@ import styles from './Sidebar.module.css';
 /**
  * Sidebar organism (REQ-FE-013 — TERMINAL state, F6).
  *
- * Every navigation entry is a REAL `NavLink`: Home + Search + Playlists
- * (F5) and Library (F6 — the last stub graduated now that the full library
- * vertical exists: backend + /library unified page + album save affordance).
- * Zero "coming soon" placeholders remain; the stub machinery is deleted
- * outright (a structural fact, not an empty loop).
+ * Every navigation entry is a REAL `NavLink`: Home + Search + Upload (F7
+ * catalog write — POST /tracks/upload) + Playlists (F5) and Library (F6 —
+ * the last stub graduated now that the full library vertical exists:
+ * backend + /library unified page + album save affordance). Zero "coming
+ * soon" placeholders remain; the stub machinery is deleted outright (a
+ * structural fact, not an empty loop).
  */
 interface NavItem {
   kind: 'link';
@@ -20,9 +21,12 @@ interface NavItem {
 
 const PRIMARY: NavItem[] = [
   // Home targets /home (the app home moved off the root index when `/`
-  // became the public landing — see app/router.tsx).
+  // became the public landing — see app/router.tsx). Upload sits between
+  // Search and Playlists: browse (Search) → contribute (Upload) → curate
+  // (Playlists) reads as the catalog's natural verb order.
   { kind: 'link', to: '/home', label: 'Home', icon: 'home' },
   { kind: 'link', to: '/search', label: 'Search', icon: 'search' },
+  { kind: 'link', to: '/upload', label: 'Upload', icon: 'upload' },
   { kind: 'link', to: '/playlists', label: 'Playlists', icon: 'playlist' },
   { kind: 'link', to: '/library', label: 'Library', icon: 'library' },
 ];

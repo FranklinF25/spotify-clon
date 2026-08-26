@@ -10,6 +10,7 @@ import {
   buildArtistDetail,
   buildSearchResult,
   buildTrack,
+  buildUploadResult,
   buildUser,
   paginate,
 } from '../fakes';
@@ -37,14 +38,19 @@ const basePath = (urlWithQuery: string): string => urlWithQuery.replace(/\?.*$/,
 const API = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
 
 /**
- * MSW handlers for ALL twelve slice-A endpoints (REQ-FE-005 "Every slice-A
- * endpoint has an MSW handler"). `:id` path params are echoed into the
- * response so path-id matching is deterministic regardless of the fake
- * sequence counter.
+ * MSW handlers for every slice-A endpoint (REQ-FE-005 "Every slice-A
+ * endpoint has an MSW handler") + the F7 upload route. `:id` path params are
+ * echoed into the response so path-id matching is deterministic regardless
+ * of the fake sequence counter.
  *
  * `/auth/refresh` returns `{ accessToken }` ONLY (no `user`) — matching
  * AuthController.refresh (DESIGN §4.1). The boot flow hydrates `user` via
  * the separate `/me` handler.
+ *
+ * The upload handler answers the 201 contract (UploadTrackResult) for BOTH
+ * transports: MSW's node interceptors catch jsdom XMLHttpRequest too (the
+ * uploadFile helper sends via XHR for progress) — verified in the F7 specs,
+ * which drive the page end-to-end through this handler.
  */
 export const handlers = [
   // --- Auth (F1) ---
@@ -123,6 +129,14 @@ export const handlers = [
   // --- Search (F4) ---
   http.get(basePath(endpoints.search('seed')), () =>
     HttpResponse.json(buildSearchResult()),
+  ),
+
+  // --- Upload (F7; REQ-UPLOAD-001) ---
+  // Accepts any multipart body — the 400 VALIDATION_ERROR envelope cases are
+  // per-spec `server.use` overrides; this default is the 201 happy path.
+  http.post(
+    endpoints.tracks.upload,
+    () => HttpResponse.json(buildUploadResult(), { status: 201 }),
   ),
 ];
 

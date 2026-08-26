@@ -22,7 +22,9 @@ export type IconName =
   | 'next'
   | 'prev'
   | 'playlist'
-  | 'library';
+  | 'library'
+  | 'upload'
+  | 'check';
 
 const PATHS: Record<IconName, string> = {
   home: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10',
@@ -34,6 +36,11 @@ const PATHS: Record<IconName, string> = {
   prev: 'M18 5l-9 7 9 7V5zM5 5h3v14H5z',
   playlist: 'M3 5h13v2H3zM3 9h13v2H3zM3 13h9v2H3zM14 13v6M14 19a1.5 1.5 0 10-.001 0z',
   library: 'M4 4v16M8 4v16M12 4v16M16 4v16',
+  // upload (F7 /upload): arrow-up over a tray — added IN-REGISTRY (the atom's
+  // own docstring names this inline registry as the extension seam; no icon
+  // font / external sprite is involved).
+  upload: 'M12 15V4M7 8l5-4 5 4M4 20h16',
+  check: 'M4 12l5 5L20 7',
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

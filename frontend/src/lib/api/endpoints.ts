@@ -37,6 +37,9 @@ export const endpoints = {
     detail: (id: string) => `${BASE}/tracks/${encodeURIComponent(id)}`,
     stream: (id: string) =>
       `${BASE}/tracks/${encodeURIComponent(id)}/stream`,
+    // Multipart POST (field "file", ≤150MB) — REQ-UPLOAD-001. No params, so
+    // a plain string (the playlists.create precedent).
+    upload: `${BASE}/tracks/upload`,
   },
   // `type` is SINGULAR. Serialised as a single `&type=artist`, NOT a
   // comma-joined plural (JD fix #1 — backend dto/search.dto.ts uses

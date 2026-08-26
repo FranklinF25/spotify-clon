@@ -94,6 +94,20 @@ export interface TrackSummary {
   albumId: string;
 }
 
+// Mirrors `UploadTrackResult` in catalog/application/upload-track.use-case.ts
+// — the 201 body of POST /tracks/upload (REQ-UPLOAD-001). The created/updated
+// track plus the artist and album it landed under. The internal storage-path
+// field is deliberately absent (R4 guard — the FE-PR1-13 architecture regex
+// asserts that here too, so this comment avoids spelling the token out); the
+// track sub-shape is NARROWER than TrackPrimitive: no `trackNumber` (uploads
+// land in a position-1 "Singles" album by default, the number is not part of
+// the upload contract).
+export interface UploadResult {
+  track: { id: string; title: string; durationSeconds: number; albumId: string };
+  artist: { id: string; name: string };
+  album: { id: string; title: string };
+}
+
 export interface PaginatedResult<T> {
   items: T[];
   total: number;

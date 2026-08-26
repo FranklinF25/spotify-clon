@@ -14,7 +14,9 @@ import type { ApiErrorCode, RefreshResponse } from '@/types/api';
  * `await res.blob()` (the binary mp3 CANNOT go through `res.text()` +
  * `JSON.parse` — that UTF-8-decodes the bytes and throws). TypeScript erases
  * types at runtime, so `request<T>` cannot branch on `T === Blob`; the
- * dedicated `getBlob` is the real source of truth.
+ * dedicated `getBlob` is the real source of truth. `uploadFile` is the THIRD
+ * path: multipart POST over XMLHttpRequest (fetch exposes no upload
+ * progress), see its own block comment below.
  */
 
 // --- Error envelope --------------------------------------------------------
@@ -260,6 +262,97 @@ async function getBlob(path: string, opts: RequestOptions = {}): Promise<Blob> {
   return res.blob();
 }
 
+// --- Multipart upload (XMLHttpRequest — the ONLY non-fetch guarded call) ---
+// fetch() has NO upload progress (the streaming request-body ReadableStream
+// + `duplex: 'half'` path gives no byte-level events), and the /upload UX is
+// a per-file progress bar (REQ-UPLOAD-002). XHR's `upload.onprogress` does.
+// Mirrors the guarded seams `request()`/`getBlob()` own: Bearer inject from
+// the store, boot-gate await, single-flight 401 refresh + retry-ONCE, zod
+// envelope parse on non-2xx (parseEnvelope is reused verbatim). The one
+// honest difference: on network failure XHR fires `onerror` with NO status —
+// surfaced as GENERIC-ish ApiError('UNKNOWN', 'network error', 0).
+//
+// 401 SINGLE-FLIGHT IS INTEGRATED (not simplified away): the transfer shares
+// the SAME module-scope `refreshPromise` as request()/getBlob(), so N
+// concurrent expiring uploads still cost exactly ONE /auth/refresh. The
+// retry re-sends the SAME `File` (a File is re-readable — FormData built
+// fresh per attempt), and `onProgress` may restart from a lower fraction on
+// the retried attempt; the page reducer treats it as a monotonic-ish
+// suggestion, not an accounting truth.
+export interface UploadOptions extends RequestOptions {
+  /** 0..1 fraction, fired from XHR upload.onprogress (lengthComputable only). */
+  onProgress?: (fraction: number) => void;
+}
+
+async function uploadFile<T>(
+  path: string,
+  file: File,
+  opts: UploadOptions = {},
+): Promise<T> {
+  if (bootRefreshGate && !opts.skipAuthRefresh) await bootRefreshGate;
+
+  const send = (token: string | null): Promise<{ status: number; text: string }> =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', path, true);
+      xhr.withCredentials = true; // cookie path for refresh; mirrors fetch calls
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          opts.onProgress?.(Math.min(1, e.loaded / e.total));
+        }
+      };
+      xhr.onload = () =>
+        resolve({ status: xhr.status, text: xhr.responseText });
+      xhr.onerror = () =>
+        reject(new ApiError('UNKNOWN', 'network error', 0));
+      xhr.onabort = () =>
+        // Mirror the native fetch-abort rejection shape (setup.ts does the
+        // same for the jsdom AbortSignal mismatch).
+        reject(new DOMException('The user aborted a request.', 'AbortError'));
+      if (opts.signal) {
+        if (opts.signal.aborted) {
+          xhr.abort();
+          return;
+        }
+        opts.signal.addEventListener('abort', () => xhr.abort(), {
+          once: true,
+        });
+      }
+      const form = new FormData();
+      form.append('file', file, file.name); // the backend multer field name
+      xhr.send(form);
+    });
+
+  let res = await send(useAuthStore.getState().accessToken);
+
+  // Single-flight 401 — identical contract to request()/getBlob(): one
+  // shared refresh, retry exactly once with the fresh token.
+  if (res.status === 401 && !opts.skipAuthRefresh) {
+    refreshPromise ??= doRefresh();
+    try {
+      const newToken = await refreshPromise;
+      res = await send(newToken);
+    } catch (e) {
+      // refresh-401 already cleared the store + redirected inside doRefresh.
+      throw e instanceof ApiError
+        ? e
+        : new ApiError('UNAUTHORIZED', 'session expired', 401);
+    }
+  }
+
+  // Same text→JSON.parse→parseEnvelope discipline as request(): an HTML
+  // 502 body must yield GENERIC(status), never a SyntaxError.
+  let parsed: unknown;
+  try {
+    parsed = res.text ? JSON.parse(res.text) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  if (res.status < 200 || res.status >= 300) parseEnvelope(res.status, parsed);
+  return parsed as T;
+}
+
 export const httpClient = {
   get: <T>(path: string, opts?: RequestOptions): Promise<T> =>
     request<T>('GET', path, undefined, opts),
@@ -271,4 +364,9 @@ export const httpClient = {
     request<T>('DELETE', path, undefined, opts),
   getBlob: (path: string, opts?: RequestOptions): Promise<Blob> =>
     getBlob(path, opts),
+  uploadFile: <T>(
+    path: string,
+    file: File,
+    opts?: UploadOptions,
+  ): Promise<T> => uploadFile<T>(path, file, opts),
 };

@@ -2,6 +2,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
@@ -11,6 +12,8 @@ import { http, HttpResponse } from 'msw';
 import { server } from '@/test/msw/server';
 import { endpoints } from '@/lib/api/endpoints';
 import { useAuthStore } from '@/store/auth.store';
+import { FakeXMLHttpRequest } from '@/test/fakes/fake-xml-http-request';
+import type { UploadResult } from '@/types/api';
 import {
   ApiError,
   httpClient,
@@ -74,6 +77,8 @@ afterEach(() => {
     writable: true,
   });
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  FakeXMLHttpRequest.reset();
 });
 afterAll(() => server.close());
 
@@ -436,5 +441,128 @@ describe('httpClient.getBlob — binary audio path', () => {
     expect(opts.signal).toBe(controller.signal);
     controller.abort();
     await expect(pending).rejects.toBeDefined();
+  });
+});
+
+/**
+ * F7 — httpClient.uploadFile: the multipart XHR path (REQ-UPLOAD-001/002).
+ * Transport is the FakeXMLHttpRequest (MSW cannot emit upload.onprogress
+ * events); the doRefresh leg of the 401 test below runs on REAL fetch + MSW,
+ * proving the XHR path shares the fetch path's single-flight refresh.
+ */
+const UPLOAD = endpoints.tracks.upload;
+const UPLOAD_FILE = new File([new Uint8Array(512)], 'song.mp3', {
+  type: 'audio/mpeg',
+});
+const UPLOAD_CONTRACT: UploadResult = {
+  track: {
+    id: 'track-001',
+    title: 'Nightcall',
+    durationSeconds: 250,
+    albumId: 'album-001',
+  },
+  artist: { id: 'artist-001', name: 'Kavinsky' },
+  album: { id: 'album-001', title: 'OutRun' },
+};
+
+describe('httpClient.uploadFile — multipart XHR path (REQ-UPLOAD-002)', () => {
+  beforeEach(() => {
+    FakeXMLHttpRequest.reset();
+    vi.stubGlobal('XMLHttpRequest', FakeXMLHttpRequest);
+    useAuthStore.setState({ accessToken: 'token-T' });
+  });
+
+  it('POSTs multipart field "file" with Bearer + credentials', async () => {
+    const p = httpClient.uploadFile<UploadResult>(UPLOAD, UPLOAD_FILE);
+    const xhr = FakeXMLHttpRequest.sent[0]!;
+    expect(xhr.method).toBe('POST');
+    expect(xhr.url).toBe(UPLOAD);
+    expect(xhr.headers['Authorization']).toBe('Bearer token-T');
+    expect(xhr.withCredentials).toBe(true);
+    expect(xhr.body).toBeInstanceOf(FormData);
+    // FormData.append(name, blob, filename) re-wraps a Blob into a NEW File
+    // (HTML spec), so identity is gone — assert the wire facts instead.
+    const sent = (xhr.body as FormData).get('file') as File;
+    expect(sent).toBeInstanceOf(File);
+    expect(sent.name).toBe('song.mp3');
+    expect(sent.size).toBe(UPLOAD_FILE.size);
+    xhr.respond(201, UPLOAD_CONTRACT);
+    await expect(p).resolves.toEqual(UPLOAD_CONTRACT);
+  });
+
+  it('maps lengthComputable progress to a 0..1 fraction, clamped at 1', async () => {
+    const onProgress = vi.fn();
+    const p = httpClient.uploadFile<UploadResult>(UPLOAD, UPLOAD_FILE, {
+      onProgress,
+    });
+    const xhr = FakeXMLHttpRequest.sent[0]!;
+    xhr.emitProgress(0.5);
+    xhr.emitProgress(1.75); // loaded beyond total must clamp, never exceed 1
+    xhr.respond(201, UPLOAD_CONTRACT);
+    await p;
+    expect(onProgress).toHaveBeenNthCalledWith(1, 0.5);
+    expect(onProgress).toHaveBeenNthCalledWith(2, 1);
+  });
+
+  it('parses a 400 VALIDATION_ERROR envelope into a typed ApiError with details', async () => {
+    const p = httpClient.uploadFile<UploadResult>(UPLOAD, UPLOAD_FILE);
+    FakeXMLHttpRequest.sent[0]!.respond(400, {
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'File upload was rejected',
+        details: [{ field: 'file', issue: 'unsupported file extension .exe' }],
+      },
+    });
+    await expect(p).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      status: 400,
+      details: [{ field: 'file', issue: 'unsupported file extension .exe' }],
+    });
+  });
+
+  it('falls through to GENERIC for an HTML 400 body — no SyntaxError leaks', async () => {
+    const p = httpClient.uploadFile<UploadResult>(UPLOAD, UPLOAD_FILE);
+    FakeXMLHttpRequest.sent[0]!.respond(400, '<html><body>Bad</body></html>');
+    const rejection = await p.then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(rejection).toBeInstanceOf(ApiError);
+    expect((rejection as ApiError).code).toBe('UNKNOWN');
+    expect((rejection as ApiError).status).toBe(400);
+  });
+
+  it('a network failure (no status) rejects as UNKNOWN', async () => {
+    const p = httpClient.uploadFile<UploadResult>(UPLOAD, UPLOAD_FILE);
+    FakeXMLHttpRequest.sent[0]!.fireError();
+    await expect(p).rejects.toMatchObject({ code: 'UNKNOWN', status: 0 });
+  });
+
+  it('a 401 shares the single-flight refresh and retries ONCE with the fresh token', async () => {
+    useAuthStore.setState({ accessToken: 'expired' });
+    let refreshCalls = 0;
+    server.use(
+      http.post(REFRESH, () => {
+        refreshCalls++;
+        return HttpResponse.json({ accessToken: 'fresh-token' });
+      }),
+    );
+
+    const p = httpClient.uploadFile<UploadResult>(UPLOAD, UPLOAD_FILE);
+    FakeXMLHttpRequest.sent[0]!.respond(
+      401,
+      { error: { code: 'UNAUTHORIZED', message: 'expired' } },
+    );
+    // The retry lands on a SECOND XHR after the (real-fetch) refresh settles.
+    await vi.waitFor(() =>
+      expect(FakeXMLHttpRequest.sent).toHaveLength(2),
+    );
+    const retry = FakeXMLHttpRequest.sent[1]!;
+    expect(retry.headers['Authorization']).toBe('Bearer fresh-token');
+    retry.respond(201, UPLOAD_CONTRACT);
+
+    await expect(p).resolves.toEqual(UPLOAD_CONTRACT);
+    expect(refreshCalls).toBe(1); // single-flight shared with fetch callers
+    expect(useAuthStore.getState().accessToken).toBe('fresh-token');
   });
 });

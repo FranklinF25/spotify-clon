@@ -50,6 +50,10 @@ function ProtectedAlbum() {
   return <div data-testid="protected-album">Protected album</div>;
 }
 
+function ProtectedUpload() {
+  return <div data-testid="protected-upload">Protected upload</div>;
+}
+
 function mountTree(initial: string) {
   return render(
     <MemoryRouter initialEntries={[initial]}>
@@ -62,6 +66,7 @@ function mountTree(initial: string) {
         <Route element={<RequireAuth />}>
           <Route path="/home" element={<ProtectedHome />} />
           <Route path="/albums/:id" element={<ProtectedAlbum />} />
+          <Route path="/upload" element={<ProtectedUpload />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -133,6 +138,19 @@ describe('router integration — REQ-FE-008 guard + fallback scenarios', () => {
     expect(screen.queryByTestId('protected-album')).not.toBeInTheDocument();
   });
 
+  // F7 — the /upload guard case mirrors /search + /albums: the upload page
+  // is an authenticated surface (POST /tracks/upload needs a Bearer).
+  it('unauthenticated deep link to /upload is redirected to /login', async () => {
+    useAuthStore.setState({ status: 'unauthenticated', user: null });
+    mountTree('/upload');
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: /sign in/i }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('protected-upload')).not.toBeInTheDocument();
+  });
+
   it('already-authenticated user at /login is redirected to /home', async () => {
     useAuthStore.setState(AUTHED);
     mountTree('/login');
@@ -199,6 +217,19 @@ describe('router — library route registration (REQ-FE-016)', () => {
   it('registers /library (LibraryPage)', () => {
     const paths = flattenPaths(routes);
     expect(paths).toContain('/library');
+  });
+});
+
+/**
+ * F7 — /upload route registration (REQ-UPLOAD-002). Same guard branch as
+ * /search: under RequireAuth + AppLayout + path '/', so an unauthenticated
+ * visit bounces to /login by route-tree construction (the scenario above
+ * exercises the runtime redirect).
+ */
+describe('router — upload route registration (REQ-UPLOAD-002)', () => {
+  it('registers /upload (UploadPage) inside the protected tree', () => {
+    const paths = flattenPaths(routes);
+    expect(paths).toContain('/upload');
   });
 });
 

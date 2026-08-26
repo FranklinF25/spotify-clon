@@ -5,6 +5,7 @@ import {
   albumSummaryAssertionSchema,
   searchResultAssertionSchema,
   refreshResponseAssertionSchema,
+  uploadResultAssertionSchema,
 } from './schemas';
 
 /**
@@ -78,6 +79,39 @@ describe('drift detection (REQ-FE-005)', () => {
       user: { id: 'u', email: 'a@b.co', displayName: 'A' },
     });
     expect(result.success).toBe(false);
+  });
+
+  it('rejects an UploadResult missing the album block (REQ-UPLOAD-001)', () => {
+    const result = uploadResultAssertionSchema.safeParse({
+      track: {
+        id: 't1',
+        title: 'T',
+        durationSeconds: 180,
+        albumId: 'a1',
+      },
+      artist: { id: 'ar1', name: 'Artist' },
+      // album OMITTED — the success row renders "(album …)" from it.
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an UploadResult leaking a filePath field (R4 guard)', () => {
+    const result = uploadResultAssertionSchema.safeParse({
+      track: {
+        id: 't1',
+        title: 'T',
+        durationSeconds: 180,
+        albumId: 'a1',
+        filePath: '/data/audio/T.mp3', // internal storage detail — must not leak
+      },
+      artist: { id: 'ar1', name: 'Artist' },
+      album: { id: 'a1', title: 'Album' },
+    });
+    // z.object is strip-by-default: filePath is IGNORED, and every required
+    // key is present — so this parses. The filePath LEAK is caught by the
+    // FE-PR1-13 architecture regex on types/api.ts (the contract surface),
+    // not here; this case documents that division of labour.
+    expect(result.success).toBe(true);
   });
 
   it('rejects a TrackPrimitive using durationMs instead of durationSeconds', () => {
