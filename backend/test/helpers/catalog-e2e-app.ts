@@ -5,7 +5,7 @@ import request from 'supertest';
 import type { PrismaClient } from '@prisma/client';
 
 import { AppModule } from '../../src/app.module';
-import { runSeed } from '../../prisma/seed';
+import { insertCanonicalCatalogFixture } from './catalog-e2e-fixture';
 import { startTestDb, type TestDbContext } from './test-db';
 
 /**
@@ -13,8 +13,10 @@ import { startTestDb, type TestDbContext } from './test-db';
  *
  * Boots a real Postgres 16 container, applies every Prisma migration, seeds
  * the canonical catalog fixture (5 artists × 10 albums × 40 tracks via
- * {@link runSeed}), and stands up the full AppModule (CatalogModule +
- * AuthModule + PrismaModule) behind Supertest.
+ * {@link insertCanonicalCatalogFixture} — a self-contained SQL inserter, NOT
+ * `prisma/seed.ts`, which now scans the real host audio library and can no
+ * longer guarantee a fixed shape), and stands up the full AppModule
+ * (CatalogModule + AuthModule + PrismaModule) behind Supertest.
  *
  * Each e2e file calls {@link startCatalogE2E} once in `beforeAll` (one
  * container per file, isolated process.env per Vitest worker) and
@@ -67,10 +69,10 @@ export async function startCatalogE2E(): Promise<CatalogE2eContext> {
 
   // Seed the canonical catalog dataset (5 × 10 × 40) BEFORE the app boots so
   // every read-only spec sees the same fixture set on the first request.
-  // `runSeed` writes via `db.prisma` (already connected to the container);
-  // AppModule's own PrismaClient lands on the same DATABASE_URL so it reads
-  // the seeded rows.
-  await runSeed(db.prisma);
+  // The fixture inserter writes via `db.prisma` (already connected to the
+  // container); AppModule's own PrismaClient lands on the same DATABASE_URL
+  // so it reads the seeded rows.
+  await insertCanonicalCatalogFixture(db.prisma);
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
@@ -84,7 +86,7 @@ export async function startCatalogE2E(): Promise<CatalogE2eContext> {
     db,
     resetCatalog: async () => {
       await db.truncate();
-      await runSeed(db.prisma);
+      await insertCanonicalCatalogFixture(db.prisma);
     },
     cleanup: async () => {
       await app.close();

@@ -78,6 +78,11 @@ services:
     # seed.ts calls loadConfig() → validates the FULL env schema, so the seed
     # container needs the SAME env map as backend (incl. JWT_*, AUDIO_STORAGE_PATH).
     environment: *backend-env
+    # Same read-only host mount as backend (REQ-DOCKER-006): the seeder scans
+    # <AUDIO_STORAGE_PATH>/audio = /data/audio to build the catalog from the
+    # real library. Without the mount the scan no-ops (warn + leave DB as-is).
+    volumes:
+      - ./audio:/data/audio:ro
     command: ["sh", "scripts/seed-with-guard.sh"]
     restart: "no"
 

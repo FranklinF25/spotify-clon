@@ -4,7 +4,7 @@
 #
 # DOCKER-PR1-03 (BEHAVIOR). This is the strict-TDD red contract for the whole
 # dockerization change: design §10.1 realized as a shell compose suite. It
-# orchestrates `docker compose down -v` → copy fixture → `up -d` → health-poll
+# orchestrates `docker compose down -v` → `up -d` → health-poll
 # (≤120s from `up` RETURN, W4) → the curl / openssl s_client / docker exec
 # assertion matrix → `down -v`.
 #
@@ -14,22 +14,17 @@
 # demo loop (register → login → refresh → browse → search → stream-bytes) IS
 # automated in the REQ-009 matrix.
 #
+# Catalog seeding: the seeder scans the reviewer-supplied host ./audio/
+# library (flat `Artist - Title.flac`), so NO track id is known up front.
+# The stream scenarios DISCOVER a real track id via the API after auth
+# (albums list → album detail → first track) — see the REQ-009 block. The
+# old copy-fixture-to-a-deterministic-UUID-path prep was removed with the
+# synthetic seeder (CO-DOCKER-3 obsolete).
+#
 # Run: `bash backend/test/docker/smoke.sh` or `make docker-smoke`.
 # Exits 0 only when ALL assertions pass.
-#
-# Deterministic seed constants (seed.ts mulberry32 SEED = 0xc4a10ca7). The
-# first seeded album/track have FIXED ids — the fixture is copied to exactly
-# that host path before `up` so the REQ-006 Range→206 scenario has a present
-# file. Computed once from the PRNG; no runtime discovery needed.
 # =============================================================================
 set -euo pipefail
-
-FIRST_ALBUM_ID="1567db9a-5c8f-4a37-910a-0c1f04585139"
-FIRST_TRACK_ID="e062632f-447d-457e-a209-94e0d0019efe"
-FIXTURE_SRC="$(cd "$(dirname "$0")/../fixtures/audio" && pwd)/sample.mp3"
-AUDIO_DIR="$(pwd)/audio"
-AUDIO_TRACK_DIR="$AUDIO_DIR/$FIRST_ALBUM_ID"
-AUDIO_TRACK_FILE="$AUDIO_TRACK_DIR/$FIRST_TRACK_ID.mp3"
 
 # COMPOSE is an ARRAY (not a quoted string) so each call site expands to two
 # distinct argv words ("docker" "compose"). A quoted scalar like
@@ -130,8 +125,7 @@ wait_seed_done() {
 cleanup() {
   local rc=$?
   "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
-  rm -rf "$AUDIO_TRACK_DIR" 2>/dev/null || true
-  rm -f /tmp/smoke_body.$$ /tmp/smoke_poison.yml.$$ 2>/dev/null || true
+  rm -f /tmp/smoke_body.$$ /tmp/smoke_poison.yml.$$ /tmp/smoke_stream.$$ /tmp/smoke_hdrs.$$ 2>/dev/null || true
   exit "$rc"
 }
 trap cleanup EXIT INT TERM
@@ -201,11 +195,10 @@ rm -f /tmp/smoke_poison.yml.$$
 # =============================================================================
 say "=== Phase B: cold start + healthy steady state ==="
 
-# REQ-009/006 prep: copy the deterministic fixture so the stream scenario has a
-# present file (CO-DOCKER-3 — ./audio/ is reviewer-supplied; the suite seeds
-# ONLY this deterministic track). Use a sub-path that won't clobber real audio.
-mkdir -p "$AUDIO_TRACK_DIR"
-cp "$FIXTURE_SRC" "$AUDIO_TRACK_FILE"
+# No fixture prep anymore: the seeder scans the host ./audio/ library
+# (mounted read-only into the seed + backend containers). The stream
+# scenarios discover a real track id via the API after auth — see the
+# REQ-009/REQ-006 blocks below.
 
 # REQ-001: single command, no --profile. `up -d` builds + starts all 5 services.
 UP_START="$SECONDS"
@@ -391,34 +384,95 @@ fi
 say "=== Phase B: REQ-009 demo loop (HTTP-level) ==="
 AUTH=(-H "Authorization: Bearer $NEW_TOKEN")
 
-# Browse: album detail embeds tracks.
-code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/albums/$FIRST_ALBUM_ID")"
+# json_first_id_after <body> <marker> — the first "id":"..." value appearing
+# AFTER <marker> in a (single-line) JSON body. awk-based: locate the marker,
+# slice the remainder, match the first "id" member, split on quotes (a[4] is
+# the value). sed cannot do this portably: it has no non-greedy quantifier,
+# so `.*"id"` would capture the LAST id on the line, not the first after the
+# marker.
+json_first_id_after() {
+  printf '%s' "$1" | awk -v m="$2" '{
+    p = index($0, m); if (p == 0) next;
+    rest = substr($0, p + length(m));
+    if (match(rest, /"id"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
+      seg = substr(rest, RSTART, RLENGTH);
+      split(seg, a, "\"");
+      print a[4]; exit;
+    }
+  }'
+}
+
+# Discover a REAL track id via the API — the seeder scans the host ./audio/
+# library, so no id is known up front (the old deterministic-UUID constants
+# died with the synthetic seeder). Chain: albums list (page 1, pageSize 1 —
+# the DTO param is `pageSize`, NOT `limit`) → album id → album detail →
+# first embedded track id.
+code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/albums?page=1&pageSize=1")"
+assert_eq "$code" "200" "REQ-009: GET /api/v1/albums?page=1&pageSize=1 → 200"
+ALBUM_ID="$(json_first_id_after "$(cat /tmp/smoke_body.$$)" '"items"')"
+if [ -n "$ALBUM_ID" ] && printf '%s' "$ALBUM_ID" | grep -qE '^[0-9a-f-]{36}$'; then
+  pass "REQ-009: discovered album id via API ($ALBUM_ID)"
+else
+  fail "REQ-009: could not discover an album id (body: $(head -c 200 /tmp/smoke_body.$$))"
+fi
+
+code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/albums/$ALBUM_ID")"
 assert_eq "$code" "200" "REQ-009: GET /api/v1/albums/:id → 200"
-code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/tracks/$FIRST_TRACK_ID")"
+# The album detail embeds tracks AFTER the artist object; slice from "tracks".
+TRACK_ID="$(json_first_id_after "$(cat /tmp/smoke_body.$$)" '"tracks"')"
+if [ -n "$TRACK_ID" ] && printf '%s' "$TRACK_ID" | grep -qE '^[0-9a-f-]{36}$'; then
+  pass "REQ-009: discovered track id via album detail ($TRACK_ID)"
+else
+  fail "REQ-009: could not discover a track id (body: $(head -c 200 /tmp/smoke_body.$$))"
+fi
+
+code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/tracks/$TRACK_ID")"
 assert_eq "$code" "200" "REQ-009: GET /api/v1/tracks/:id → 200"
 
 # Search returns grouped results.
-code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/search?q=Track")"
+code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/search?q=a")"
 assert_eq "$code" "200" "REQ-009: GET /api/v1/search?q= → 200"
 
 # -----------------------------------------------------------------------------
-# REQ-006 — Range streams bytes (file present); missing file → 404 envelope
+# REQ-006 — Range streams bytes (real library file); unknown track → 404
 # -----------------------------------------------------------------------------
 say "=== Phase B: REQ-006 audio Range streaming ==="
-code="$(curl -k -s "${AUTH[@]}" -H 'Range: bytes=0-1023' \
+# Scenario 1: Range → 206 Partial Content with a Content-Range header. The
+# response headers are dumped to a temp file so Content-Range can be asserted
+# (the http() helper discards headers).
+code="$(curl -k -s -D /tmp/smoke_hdrs.$$ "${AUTH[@]}" -H 'Range: bytes=0-1023' \
   -o /tmp/smoke_stream.$$ -w '%{http_code}' \
-  "$BASE_URL/api/v1/tracks/$FIRST_TRACK_ID/stream")"
+  "$BASE_URL/api/v1/tracks/$TRACK_ID/stream")"
 assert_eq "$code" "206" "REQ-006: Range → 206 Partial Content"
+assert_contains "$(cat /tmp/smoke_hdrs.$$)" "Content-Range: bytes 0-1023/" \
+  "REQ-006: 206 carries Content-Range: bytes 0-1023/<total>"
 BYTES_GOT="$(wc -c < /tmp/smoke_stream.$$ | tr -d '[:space:]')"
 assert_eq "$BYTES_GOT" "1024" "REQ-006: 1024 bytes streamed (Range 0-1023)"
+# Content-Type is derived from the file extension (flac → audio/flac, mp3 →
+# audio/mpeg) — assert one of the pinned MIME types, NOT a hardcoded one:
+# the host library is reviewer-supplied and may mix formats.
+assert_contains "$(cat /tmp/smoke_hdrs.$$)" "Content-Type: audio/" \
+  "REQ-006: 206 carries an audio/* Content-Type (extension-derived)"
 
-# Scenario 2: file missing → 404 + NOT_FOUND envelope (behavior preserved).
-rm -f "$AUDIO_TRACK_FILE"
-code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/tracks/$FIRST_TRACK_ID/stream")"
-assert_eq "$code" "404" "REQ-006: missing file → 404"
+# Scenario 1b: full GET → 200 with a non-empty body (the real file streams).
+code="$(curl -k -s "${AUTH[@]}" -o /tmp/smoke_stream.$$ -w '%{http_code}' \
+  "$BASE_URL/api/v1/tracks/$TRACK_ID/stream")"
+assert_eq "$code" "200" "REQ-006: full GET → 200"
+FULL_BYTES="$(wc -c < /tmp/smoke_stream.$$ | tr -d '[:space:]')"
+if [ "$FULL_BYTES" -gt 0 ]; then
+  pass "REQ-006: full GET streamed $FULL_BYTES bytes"
+else
+  fail "REQ-006: full GET streamed 0 bytes"
+fi
+
+# Scenario 2: unknown track id → 404 + NOT_FOUND envelope (behavior
+# preserved). The old file-missing variant deleted a host library file and
+# restored it — unacceptable against the reviewer's REAL ./audio content;
+# the disk-missing path stays covered by the unit suite (fs-audio-storage
+# spec #4 + playback controller spec 404 case).
+code="$(http "${AUTH[@]}" "$BASE_URL/api/v1/tracks/00000000-0000-0000-0000-000000000000/stream")"
+assert_eq "$code" "404" "REQ-006: unknown track → 404"
 assert_contains "$(cat /tmp/smoke_body.$$)" "NOT_FOUND" "REQ-006: 404 carries NOT_FOUND envelope"
-# Restore the fixture so later volume-lifecycle phases still see it if needed.
-cp "$FIXTURE_SRC" "$AUDIO_TRACK_FILE"
 
 # -----------------------------------------------------------------------------
 # REQ-011 — multi-stage image correctness
@@ -450,7 +504,10 @@ BASE_ARTISTS="$ARTISTS_AFTER"
 BASE_TRACKS="$TRACKS_AFTER"
 
 # REQ-004 scenario 2: re-run migrate is a no-op that exits 0.
-# REQ-005 scenario 2: warm restart (down WITHOUT -v) skips seeding, counts unchanged.
+# REQ-005 scenario 2 (sync semantics): warm restart (down WITHOUT -v) RE-RUNS
+# the seed as an idempotent sync — no count-guard skip anymore. Counts MUST
+# stay unchanged because every row id is derived from stable content keys
+# and the upserts hit ON CONFLICT DO UPDATE, not fresh inserts.
 "${COMPOSE[@]}" down >/dev/null 2>&1
 "${COMPOSE[@]}" up -d >/dev/null 2>&1
 for c in "$DB_C" "$BACKEND_C" "$FRONTEND_C"; do
@@ -459,8 +516,8 @@ done
 MIG_LOGS_2="$("${COMPOSE[@]}" logs migrate 2>/dev/null || true)"
 assert_contains "$MIG_LOGS_2" "already applied\|No pending" "REQ-004: re-run migrate is a no-op"
 SEED_LOGS_2="$("${COMPOSE[@]}" logs seed 2>/dev/null || true)"
-assert_contains "$SEED_LOGS_2" "skipping" "REQ-005: warm restart seed logs 'skipping'"
-# W4: gate the warm-restart count read on seed finishing (skip path also exits 0).
+assert_contains "$SEED_LOGS_2" "idempotent sync" "REQ-005: warm restart re-runs seed (guard logs 'idempotent sync')"
+# W4: gate the warm-restart count read on seed finishing (sync path also exits 0).
 wait_seed_done 60 || fail "REQ-005: seed did not reach exited/0 within 60s on warm restart"
 WARM_ARTISTS="$(count_rows artists)"
 WARM_TRACKS="$(count_rows tracks)"

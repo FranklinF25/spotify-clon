@@ -11,7 +11,8 @@ import {
  * `GET /api/v1/artists` + `GET /api/v1/artists/:id` e2e (catalog spec: "Artist
  * Read Endpoints" — Requirements R1 + R2).
  *
- * The canonical seed (`runSeed` from `catalog-e2e-app.ts`) populates 5 artists
+ * The canonical fixture (`insertCanonicalCatalogFixture` from
+ * `catalog-e2e-app.ts`) populates 5 artists
  * with 2 albums each, so the assertions below reference that exact fixture
  * shape. A dedicated pagination spec (CAT-PR2b2-05) covers the INVALID_PAGINATION
  * matrix exhaustively; this file focuses on the artist read scenarios.
