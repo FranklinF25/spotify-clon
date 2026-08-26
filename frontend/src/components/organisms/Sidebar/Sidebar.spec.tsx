@@ -57,7 +57,7 @@ describe('Sidebar — REQ-FE-013 terminal state (zero stubs)', () => {
     renderSidebarAt('/');
     expect(screen.getByRole('link', { name: /home/i })).toHaveAttribute(
       'href',
-      '/',
+      '/home',
     );
     expect(screen.getByRole('link', { name: /search/i })).toHaveAttribute(
       'href',

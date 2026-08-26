@@ -27,7 +27,7 @@ function mountRegister(initialEntry = '/register') {
   return render(
     <Routes>
       <Route path="/register" element={<RegisterPage />} />
-      <Route path="/" element={<div data-testid="home">HOME</div>} />
+      <Route path="/home" element={<div data-testid="home">HOME</div>} />
     </Routes>,
     { routeInitialEntries: [initialEntry] },
   );
@@ -99,7 +99,7 @@ describe('RegisterPage — zod validation (REQ-FE-007)', () => {
 });
 
 describe('RegisterPage — success authenticates + navigates', () => {
-  it('authenticates and navigates to / on a 201', async () => {
+  it('authenticates and navigates to /home on a 201', async () => {
     mountRegister();
     fillAndSubmit('a@b.co', 'password1', 'Alice');
 

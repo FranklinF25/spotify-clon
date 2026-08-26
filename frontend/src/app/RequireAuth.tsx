@@ -8,7 +8,7 @@ import { Splash } from '@/components/organisms/Splash';
  *  - unauthenticated → redirect to /login, preserving the requested route in
  *    `location.state.from` so `<LoginPage>` can return the user after a
  *    successful login (R2-8: a deep-link to /albums/:id while logged out
- *    returns there, not to /).
+ *    returns there, not to the app home at /home).
  *  - authenticated && user → render the protected `<Outlet/>`.
  *  - otherwise (idle | authenticating | authenticated && user===null) → Splash.
  *    Splash during boot prevents a protected data fetch from racing the boot

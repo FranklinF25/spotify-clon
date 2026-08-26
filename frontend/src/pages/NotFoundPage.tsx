@@ -17,7 +17,7 @@ export function NotFoundPage({ message }: NotFoundPageProps) {
   return (
     <div className={styles.notFound} role="alert">
       <p className={styles.message}>{message ?? "We couldn't find that"}</p>
-      <Link to="/" className={styles.homeLink}>
+      <Link to="/home" className={styles.homeLink}>
         Back to Home
       </Link>
     </div>

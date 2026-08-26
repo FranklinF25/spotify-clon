@@ -7,6 +7,7 @@ import { RequireAuth } from './RequireAuth';
 import { RedirectIfAuthed } from './RedirectIfAuthed';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
+import { LandingPage } from '@/pages/LandingPage';
 import { HomePage } from '@/pages/HomePage';
 import { AlbumPage } from '@/pages/AlbumPage';
 import { ArtistPage } from '@/pages/ArtistPage';
@@ -19,14 +20,19 @@ import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
 
 /**
  * Route table (DESIGN §8, REQ-FE-008). Exported so the router spec builds a
- * `createMemoryRouter` from the SAME definitions the production
- * `createBrowserRouter` uses.
+ * `createMemoryRouter`-shaped declarative mirror from the SAME definitions
+ * the production `createBrowserRouter` uses.
  *
- *  - Public routes (/login, /register) sit under `<RedirectIfAuthed>` +
- *    `<AuthLayout>` (the centered-card public shell).
+ *  - PUBLIC root: `/` hosts the marketing LandingPage under
+ *    `<RedirectIfAuthed>` (unauthenticated → landing; authenticated →
+ *    `<Navigate to="/home">`). /login + /register stay in the same group,
+ *    wrapped by `<AuthLayout>` (the centered-card public shell).
  *  - Protected routes sit under `<RequireAuth>` + `<AppLayout>` (Sidebar +
- *    Topbar + Outlet + PlayerBarSlot). The nested children:
- *      /                HomePage (featured albums — REQ-FE-009)
+ *    Topbar + Outlet + PlayerBar). The nested children:
+ *      /home            HomePage (featured albums — REQ-FE-009). The app home
+ *                       moved OFF the root index so `/` can serve the public
+ *                       landing; `<RedirectIfAuthed>` bounces authed visitors
+ *                       from `/` to here.
  *      /albums/:id      AlbumPage (tracks + queue seeding — REQ-FE-009)
  *      /artists/:id     ArtistPage (embedded albums — REQ-FE-009)
  *      /search          SearchPage (PLACEHOLDER — real impl lands FE-PR4-06)
@@ -36,7 +42,9 @@ import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
  *    React Router keeps AppLayout mounted across these transitions
  *    (REQ-FE-008 "PlayerBar mounted exactly once" depends on this in PR-4).
  *  - The `*` catch-all is OUTSIDE both guard parents so unknown routes
- *    redirect to "/" regardless of auth state.
+ *    redirect to "/" regardless of auth state: unauthenticated visitors land
+ *    on the public landing; authenticated ones are routed onward to /home by
+ *    `<RedirectIfAuthed>`.
  *
  * NOTE: data-router `<Navigate>` + jsdom's AbortSignal is covered in the spec
  * comment (router.spec.tsx) — the declarative router drives the integration
@@ -46,6 +54,7 @@ export const routes: RouteObject[] = [
   {
     element: <RedirectIfAuthed />,
     children: [
+      { path: '/', element: <LandingPage /> },
       { path: '/login', element: <AuthLayout><LoginPage /></AuthLayout> },
       { path: '/register', element: <AuthLayout><RegisterPage /></AuthLayout> },
     ],
@@ -59,7 +68,7 @@ export const routes: RouteObject[] = [
           {
             path: '/',
             children: [
-              { index: true, element: <HomePage /> },
+              { path: 'home', element: <HomePage /> },
               { path: 'albums/:id', element: <AlbumPage /> },
               { path: 'artists/:id', element: <ArtistPage /> },
               { path: 'search', element: <SearchPage /> },

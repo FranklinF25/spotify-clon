@@ -21,11 +21,11 @@ import styles from './AppLayout.module.css';
  * `<PlayerBar/>` organism (audio sync seam + blob lifecycle, FE-PR4-02).
  * The runtime single-mount invariant (REQ-FE-008 "PlayerBar is mounted
  * exactly once in AppLayout") is enforced by architecture.spec.ts Part 2:
- * it renders this layout, navigates between `/`, `/albums/:id`, `/artists/:id`,
- * and asserts the `<audio>` element identity is STABLE.
+ * it renders this layout, navigates between `/home`, `/albums/:id`,
+ * `/artists/:id`, and asserts the `<audio>` element identity is STABLE.
  *
- * React Router keeps this layout element mounted across `/` ↔ `/albums/:id`
- * ↔ `/artists/:id` transitions because the entire protected route table is
+ * React Router keeps this layout element mounted across /home ↔ /albums/:id
+ * ↔ /artists/:id transitions because the entire protected route table is
  * nested under one AppLayout element.
  */
 export function AppLayout() {

@@ -19,15 +19,16 @@ interface LocationState {
  * `details[].field` onto `FormField`; UNAUTHORIZED becomes a generic inline
  * form error (bad credentials aren't field-specific); other codes toast.
  *
- * On success the form navigates to `location.state?.from ?? '/'` (R2-8: a
- * deep-link to a protected route while logged out returns there after login).
+ * On success the form navigates to `location.state?.from ?? '/home'` (R2-8: a
+ * deep-link to a protected route while logged out returns there after login;
+ * the default target is the app home — `/` is the public landing).
  */
 export function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
   const location = useLocation();
   const from =
-    (location.state as LocationState | null)?.from?.pathname ?? '/';
+    (location.state as LocationState | null)?.from?.pathname ?? '/home';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

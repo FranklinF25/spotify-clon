@@ -28,7 +28,7 @@ describe('NotFoundPage', () => {
       </MemoryRouter>,
     );
     const home = screen.getByRole('link', { name: /home/i });
-    expect(home).toHaveAttribute('href', '/');
+    expect(home).toHaveAttribute('href', '/home');
   });
 
   it('renders a custom message when provided (inline composition by pages)', () => {

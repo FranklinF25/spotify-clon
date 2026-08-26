@@ -8,11 +8,12 @@ import { RedirectIfAuthed } from './RedirectIfAuthed';
 /**
  * FE-PR2-05 — `<RedirectIfAuthed>` guard (DESIGN §8, REQ-FE-008).
  *
- * Wraps the public routes (/login, /register):
+ * Wraps the public routes (`/` landing, /login, /register):
  *  - idle | authenticating → <Splash/> (R2-7: avoid a flash-of-login-then-
  *    redirect-away when the silent refresh succeeds; splash until boot settles).
- *  - authenticated → <Navigate to="/" replace/> (login card does NOT render).
- *  - unauthenticated → <Outlet/> (the login/register form renders).
+ *  - authenticated → <Navigate to="/home" replace/> (the app home; the
+ *    public surfaces do NOT render).
+ *  - unauthenticated → <Outlet/> (the landing / login / register form renders).
  */
 function PublicForm() {
   return <div data-testid="public-form">LOGIN CARD</div>;
@@ -28,7 +29,7 @@ function mountAt(route: string) {
       <Route element={<RedirectIfAuthed />}>
         <Route path="/login" element={<PublicForm />} />
       </Route>
-      <Route path="/" element={<HomeProbe />} />
+      <Route path="/home" element={<HomeProbe />} />
     </Routes>,
     { routeInitialEntries: [route] },
   );
@@ -41,7 +42,7 @@ describe('<RedirectIfAuthed>', () => {
     expect(screen.getByTestId('public-form')).toBeInTheDocument();
   });
 
-  it('redirects an authenticated user to / and does NOT render the login card (REQ-FE-008)', () => {
+  it('redirects an authenticated user to /home and does NOT render the login card (REQ-FE-008)', () => {
     useAuthStore.setState({
       status: 'authenticated',
       user: { id: 'u', email: 'a@b.co', displayName: 'A' },

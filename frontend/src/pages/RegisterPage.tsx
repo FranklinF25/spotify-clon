@@ -23,14 +23,15 @@ interface LocationState {
  *    either — single, inline, non-crashing UX.
  *  - other codes → toast.
  *
- * On success the form authenticates + navigates to `location.state?.from ?? '/'`.
+ * On success the form authenticates + navigates to
+ * `location.state?.from ?? '/home'` (the app home — `/` is the public landing).
  */
 export function RegisterPage() {
   const register = useAuthStore((s) => s.register);
   const navigate = useNavigate();
   const location = useLocation();
   const from =
-    (location.state as LocationState | null)?.from?.pathname ?? '/';
+    (location.state as LocationState | null)?.from?.pathname ?? '/home';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

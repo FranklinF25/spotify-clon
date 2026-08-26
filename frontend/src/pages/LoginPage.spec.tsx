@@ -19,8 +19,9 @@ import { LoginPage } from './LoginPage';
 /**
  * FE-PR2-07 — LoginPage (REQ-FE-007). Covers: zod blocks an invalid submission
  * BEFORE any request; success authenticates + navigates to
- * `location.state?.from ?? '/'` (R2-8); UNAUTHORIZED surfaces an inline form
- * error (the form owns it — NOT a toast).
+ * `location.state?.from ?? '/home'` (R2-8 — the app home; `/` is the public
+ * landing); UNAUTHORIZED surfaces an inline form error (the form owns it —
+ * NOT a toast).
  */
 const LOGIN = endpoints.auth.login;
 
@@ -28,7 +29,7 @@ function mountLogin(initialEntry = '/login') {
   return render(
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<div data-testid="home">HOME</div>} />
+      <Route path="/home" element={<div data-testid="home">HOME</div>} />
       <Route path="/albums/:id" element={<div data-testid="album">ALBUM</div>} />
     </Routes>,
     { routeInitialEntries: [initialEntry] },
@@ -95,7 +96,7 @@ describe('LoginPage — zod validation (REQ-FE-007)', () => {
 });
 
 describe('LoginPage — success navigates to `from` (R2-8)', () => {
-  it('navigates to / when there is no state.from', async () => {
+  it('navigates to /home when there is no state.from', async () => {
     mountLogin('/login');
     fillAndSubmit('a@b.co', 'password1');
 

@@ -66,7 +66,7 @@ describe('architecture — Part 2: PlayerBar single-mount RUNTIME (DESIGN §10, 
   // REQ-FE-008 scenario "PlayerBar is mounted exactly once in AppLayout".
   // The entire protected route table is nested under one <AppLayout/>
   // element, so React Router keeps the layout (and therefore PlayerBar's
-  // <audio> ref) mounted across `/` <-> `/albums/:id` <-> `/artists/:id`
+  // <audio> ref) mounted across `/home` <-> `/albums/:id` <-> `/artists/:id`
   // navigation. The assertion is RUNTIME (same DOM node across navigations),
   // not a static "imported by exactly one module" count — the latter is
   // unsatisfiable because useAudioSource is co-located with PlayerBar.
@@ -95,11 +95,11 @@ describe('architecture — Part 2: PlayerBar single-mount RUNTIME (DESIGN §10, 
     }
 
     render(
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={['/home']}>
         <NavigateProbe />
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/" element={<div data-testid="home">Home</div>} />
+            <Route path="/home" element={<div data-testid="home">Home</div>} />
             <Route
               path="albums/:id"
               element={<div data-testid="album">Album</div>}
