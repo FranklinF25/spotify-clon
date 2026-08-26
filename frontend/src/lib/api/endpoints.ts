@@ -63,4 +63,10 @@ export const endpoints = {
     reorder: (id: string) =>
       `${BASE}/playlists/${encodeURIComponent(id)}/reorder`,
   },
+  // Library namespace (F6; DESIGN §9.6). `album(id)` addresses the saved
+  // relation: POST = save (204 upsert), DELETE = remove (204 idempotent).
+  library: {
+    albums: `${BASE}/library/albums`,
+    album: (id: string) => `${BASE}/library/albums/${encodeURIComponent(id)}`,
+  },
 };

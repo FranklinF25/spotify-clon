@@ -5,6 +5,7 @@ import { AuthModule } from './contexts/identity/infrastructure/auth.module';
 import { CatalogModule } from './contexts/catalog/infrastructure/catalog.module';
 import { PlaybackModule } from './contexts/playback/infrastructure/playback.module';
 import { PlaylistsModule } from './contexts/playlists/infrastructure/playlists.module';
+import { LibraryModule } from './contexts/library/infrastructure/library.module';
 import { ConfigModule } from './config.module';
 import { GlobalExceptionFilter } from './exception.filter';
 import { HealthController } from './health.controller';
@@ -32,7 +33,7 @@ export { ENV_CONFIG } from './config.tokens';
  * and imports the bounded contexts (identity, catalog, playback, playlists).
  */
 @Module({
-  imports: [ConfigModule, PrismaModule, AuthModule, CatalogModule, PlaybackModule, PlaylistsModule],
+  imports: [ConfigModule, PrismaModule, AuthModule, CatalogModule, PlaybackModule, PlaylistsModule, LibraryModule],
   controllers: [HealthController],
   providers: [AppLogger, { provide: APP_FILTER, useClass: GlobalExceptionFilter }],
   exports: [AppLogger],

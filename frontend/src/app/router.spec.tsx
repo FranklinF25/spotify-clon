@@ -134,3 +134,15 @@ describe('router — playlists route registration (REQ-FE-014/015)', () => {
     expect(paths).toContain('/playlists/:id');
   });
 });
+
+/**
+ * F6 WORK-PR3-06 — /library route registration (REQ-FE-016). The unified
+ * page must sit under the RequireAuth + AppLayout + path '/' branch so the
+ * unauthenticated-redirect scenario is enforced by the route tree.
+ */
+describe('router — library route registration (REQ-FE-016)', () => {
+  it('registers /library (LibraryPage)', () => {
+    const paths = flattenPaths(routes);
+    expect(paths).toContain('/library');
+  });
+});

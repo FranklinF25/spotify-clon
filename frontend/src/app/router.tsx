@@ -13,6 +13,7 @@ import { ArtistPage } from '@/pages/ArtistPage';
 import { SearchPage } from '@/pages/SearchPage';
 import { PlaylistsPage } from '@/pages/PlaylistsPage';
 import { PlaylistDetailPage } from '@/pages/PlaylistDetailPage';
+import { LibraryPage } from '@/pages/LibraryPage';
 import { AuthLayout } from '@/components/templates/AuthLayout/AuthLayout';
 import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
 
@@ -31,6 +32,7 @@ import { AppLayout } from '@/components/templates/AppLayout/AppLayout';
  *      /search          SearchPage (PLACEHOLDER — real impl lands FE-PR4-06)
  *      /playlists       PlaylistsPage (owner list — REQ-FE-014, PR-3)
  *      /playlists/:id   PlaylistDetailPage (tracks + play handoff — REQ-FE-015)
+ *      /library         LibraryPage (unified view — REQ-FE-016, F6)
  *    React Router keeps AppLayout mounted across these transitions
  *    (REQ-FE-008 "PlayerBar mounted exactly once" depends on this in PR-4).
  *  - The `*` catch-all is OUTSIDE both guard parents so unknown routes
@@ -63,6 +65,7 @@ export const routes: RouteObject[] = [
               { path: 'search', element: <SearchPage /> },
               { path: 'playlists', element: <PlaylistsPage /> },
               { path: 'playlists/:id', element: <PlaylistDetailPage /> },
+              { path: 'library', element: <LibraryPage /> },
             ],
           },
         ],

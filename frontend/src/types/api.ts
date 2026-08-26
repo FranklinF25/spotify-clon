@@ -156,6 +156,16 @@ export interface PlaylistTrackPrimitive {
   addedAt: string;
 }
 
+// --- Library (F6; DESIGN §9.6) ---------------------------------------------
+// Hand-synced to the backend `library` context response projection
+// (ListLibraryUseCase's SavedAlbum, serialized as JSON — `addedAt` Date →
+// ISO string). Reuses AlbumSummary verbatim: the catalog projection is the
+// card payload; only the (user, album) relation is new.
+export interface SavedAlbum {
+  album: AlbumSummary;
+  addedAt: string; // ISO string from JSON
+}
+
 /**
  * Backend error vocabulary (R-app-2; hand-synced to the backend `ErrorCode`
  * enum in identity/error-codes.ts + playlists widening). Used to type
