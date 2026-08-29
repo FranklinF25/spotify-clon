@@ -1,5 +1,8 @@
 # Markdown files (per user request — not tracked in this repo)
 *.md
+# Exception: the root README is the repo's public face (and the Makefile's
+# smoke-suite docs point reviewers at its "Docker demo" section).
+!README.md
 
 # OpenSpec / SDD artifacts (local-only planning artifacts, kept locally + Engram)
 openspec/
