@@ -62,7 +62,17 @@ export default defineConfig({
           // both are portfolio-level regression guards (DESIGN §3.4 + §6
           // rule contracts). The lint-rules spec is NOT a unit test (it
           // drives the real ESLint flat config via the `ESLint` API).
-          include: ['test/architecture.spec.ts', 'test/lint-rules.spec.ts'],
+          // The two openapi specs are the same kind of guard for the API
+          // reference (API-DOC): route coverage is a ts-morph scan + exact
+          // set match against the generated document; document shape pins
+          // the bearer scheme, context tags, multipart upload, and the
+          // error-code enum mirror.
+          include: [
+            'test/architecture.spec.ts',
+            'test/lint-rules.spec.ts',
+            'test/openapi-coverage.spec.ts',
+            'test/openapi-document.spec.ts',
+          ],
           setupFiles: ['test/vitest.setup.ts'],
         },
       },
