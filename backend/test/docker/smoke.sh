@@ -295,9 +295,14 @@ assert_contains "$(cat /tmp/smoke_body.$$)" '<div id="root"' "REQ-002: SPA root 
 
 # Scenario 3: cert CN + SAN.
 cert_info="$(echo | openssl s_client -connect localhost:443 -servername localhost 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName 2>/dev/null || true)"
-assert_contains "$cert_info" "CN=localhost" "REQ-002: cert CN=localhost"
-assert_contains "$cert_info" "DNS:localhost" "REQ-002: cert SAN contains DNS:localhost"
-assert_contains "$cert_info" "127.0.0.1" "REQ-002: cert SAN contains IP:127.0.0.1"
+# OpenSSL format drift: 1.x prints `subject=CN=localhost`; 3.x prints
+# `subject=CN = localhost` (spaces around '='). Strip spaces once and match
+# the needles against the normalized copy — the SAN needles contain no
+# spaces, so they survive normalization unchanged.
+cert_info_normalized="$(printf '%s' "$cert_info" | tr -d ' ')"
+assert_contains "$cert_info_normalized" "CN=localhost" "REQ-002: cert CN=localhost"
+assert_contains "$cert_info_normalized" "DNS:localhost" "REQ-002: cert SAN contains DNS:localhost"
+assert_contains "$cert_info_normalized" "127.0.0.1" "REQ-002: cert SAN contains IP:127.0.0.1"
 
 # Scenario 4: TLS 1.1 refused, 1.2 negotiated.
 # W3 fix: on openssl ≥3.x (this host is 3.5.x) `-tls1_1` fails CLIENT-SIDE at
