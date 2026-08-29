@@ -38,7 +38,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20.18
+          # Test toolchain runs Node 24 (dev parity): Testcontainers pulls
+          # undici 8.x, which requires APIs absent from Node 20. The
+          # production runtime image (backend/Dockerfile) stays on 20.18 —
+          # the container never runs the test toolchain.
+          node-version: 24.15
           cache: pnpm
           cache-dependency-path: backend/pnpm-lock.yaml
 
@@ -72,7 +76,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20.18
+          node-version: 24.15
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 

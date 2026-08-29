@@ -195,10 +195,16 @@ rm -f /tmp/smoke_poison.yml.$$
 # =============================================================================
 say "=== Phase B: cold start + healthy steady state ==="
 
-# No fixture prep anymore: the seeder scans the host ./audio/ library
-# (mounted read-only into the seed + backend containers). The stream
-# scenarios discover a real track id via the API after auth — see the
-# REQ-009/REQ-006 blocks below.
+# Audio library prep (REQ-005): the seeder scans the host ./audio/
+# directory (gitignored — a fresh checkout or CI runner starts EMPTY, and
+# the seed correctly no-ops on an empty root). Copy the deterministic
+# fixture into the library root so cold-start seeding has content to scan
+# regardless of environment. The stream scenarios then discover the seeded
+# track id via the API after auth — see the REQ-009/REQ-006 blocks below.
+FIXTURE_SRC="$(cd "$(dirname "$0")/../fixtures/audio" && pwd)/sample.mp3"
+AUDIO_DIR="$(pwd)/audio"
+mkdir -p "$AUDIO_DIR"
+cp "$FIXTURE_SRC" "$AUDIO_DIR/sample.mp3"
 
 # REQ-001: single command, no --profile. `up -d` builds + starts all 5 services.
 UP_START="$SECONDS"
