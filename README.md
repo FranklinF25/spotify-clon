@@ -1,5 +1,7 @@
 # Spotify Clon — a streaming app for the library you already own
 
+[![CI](https://github.com/FranklinF25/spotify-clon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/FranklinF25/spotify-clon/actions/workflows/ci.yml)
+
 A full-stack music streaming platform that turns a folder of your own audio files into a browsable, searchable, playable catalog — with authentication, playlists, saved albums, a track uploader, and live interactive API documentation. Built as a production-discipline portfolio piece: real hexagonal boundaries, executable architecture tests, and contract-drift guards on every seam.
 
 ## Quick start (the Docker demo)

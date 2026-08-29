@@ -1,0 +1,105 @@
+# CI — three parallel gates mirroring the repo's verification story:
+#   backend  — typecheck, lint, full test suite (726: unit + architecture +
+#              contract + e2e via Testcontainers against the runner's Docker)
+#   frontend — typecheck, lint, test suite (390: unit + MSW contract-drift +
+#              architecture) and a production Vite build
+#   smoke    — the 27 black-box TLS scenarios (make docker-smoke) against the
+#              real 5-service compose stack. The runner has no host Apache on
+#              port 80, so even the HTTP→301 redirect scenario runs clean.
+#
+# No secrets configured anywhere: the demo JWT secrets ship in compose as
+# documented placeholders and every database is ephemeral (Testcontainers /
+# compose volume), so the pipeline touches nothing from the secrets tab.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (typecheck · lint · tests + e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      # e2e specs spin up PostgreSQL 16 via Testcontainers — the hosted
+      # runners ship a Docker daemon, so this needs no extra setup.
+      - name: Test (unit + architecture + contract + e2e)
+        run: pnpm test
+
+  frontend:
+    name: Frontend (typecheck · lint · tests · build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test (unit + contract-drift + architecture)
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+  smoke:
+    name: Smoke (27 TLS scenarios)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bash + docker compose + curl only — no Node toolchain needed. The
+      # script builds the 5-service stack, waits for the healthy steady
+      # state (≤120s cold-start budget), and runs the assertion matrix.
+      - name: Black-box TLS suite
+        run: make docker-smoke
